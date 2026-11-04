@@ -352,7 +352,7 @@ def app_row():
         import miniapp
         from telegram import WebAppInfo
         u = miniapp.app_url()
-        return [_B('📊 مینی‌اپ داشبورد', web_app=WebAppInfo(url=u))] if u else None
+        return [_B('👤 پروفایل (مینی‌اپ)', web_app=WebAppInfo(url=u))] if u else None
     except Exception:
         return None
 

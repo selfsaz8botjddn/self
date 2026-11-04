@@ -82,7 +82,21 @@ def _cm():
     return commerce
 
 
-def build_state(uid, member=True):
+def _referral_count(uid):
+    """تعداد دعوت‌های موفق (کسی که با لینک این کاربر اومده و عضویتش تأیید شده)."""
+    cm = _cm()
+    s = cm.get_session()
+    try:
+        return int(s.query(cm.Wallet).filter(cm.Wallet.referrer == uid,
+                                             cm.Wallet.referred_awarded.is_(True)).count())
+    except Exception:
+        logger.exception("miniapp: referral count failed")
+        return 0
+    finally:
+        s.close()
+
+
+def build_state(uid, member=True, user=None):
     cm = _cm()
     import selfbot
     w = cm.wallet(uid)
@@ -92,8 +106,19 @@ def build_state(uid, member=True):
     hours = int(bal / rate) if bal > 0 else 0
     row = selfbot.get_row(uid)
     now = int(time.time())
+    user = user or {}
+    uname = str(user.get("username") or "").strip()
+    fname = " ".join(x for x in (str(user.get("first_name") or "").strip(),
+                                 str(user.get("last_name") or "").strip()) if x)[:60]
+    trial_left = max(0, int(w.get("trial_until") or 0) - now)
     return {
         "id": uid,
+        "username": uname,
+        "name": fname,
+        "referrals": _referral_count(uid),
+        "days_left": hours // 24,
+        "hours_left": hours % 24,
+        "trial_days_left": (trial_left + 86399) // 86400 if trial_left else 0,
         "balance": cm.fmt_bal(bal),
         "spent": cm.fmt_bal(w["spent"]),
         "toman": int(bal * Decimal(cm.unit_price())),
@@ -240,6 +265,7 @@ async def _route(method, path, headers, body):
             return _resp(404, {"error": "not_found"})
         return _resp(200, b, "image/webp", cache="public, max-age=86400")
     if path in ("/api/me", "/api/toggle", "/api/snk/state", "/api/snk/roll",
+                "/api/snk/packs", "/api/snk/pack_add", "/api/snk/chat",
                 "/api/self/state", "/api/self/act", "/api/self/dialogs"):
         if method != "POST":
             return _resp(405, {"error": "method"})
@@ -275,11 +301,15 @@ async def _route(method, path, headers, body):
             except Exception:
                 return _resp(400, {"error": "bad_request"})
             import snakes
-            return _resp(200, await snakes.api(path, uid, data))
+            try:
+                return _resp(200, await snakes.api(path, uid, data))
+            except Exception:
+                logger.exception("miniapp: snakes api failed (%s)", path)
+                return _resp(200, {"error": "internal"})
         if _limited(uid):
             return _resp(403, {"error": "rate"})
         if path == "/api/me":
-            return _resp(200, build_state(uid, await _member(uid)))
+            return _resp(200, build_state(uid, await _member(uid), user))
         try:
             data = json.loads(body.decode() or "{}")
             want = data.get("on")
@@ -288,7 +318,7 @@ async def _route(method, path, headers, body):
         except Exception:
             return _resp(400, {"error": "bad_request"})
         ok, err = await toggle(uid, want)
-        st = build_state(uid, err != "not_member")
+        st = build_state(uid, err != "not_member", user)
         st["ok"] = ok
         if err:
             st["error"] = err
@@ -346,7 +376,7 @@ async def _start(context=None):
         try:
             from telegram import MenuButtonWebApp, WebAppInfo
             await _app_ref[0].bot.set_chat_menu_button(
-                menu_button=MenuButtonWebApp(text="داشبورد", web_app=WebAppInfo(url=app_url())))
+                menu_button=MenuButtonWebApp(text="پروفایل", web_app=WebAppInfo(url=app_url())))
         except Exception:
             logger.exception("miniapp: set menu button failed")
 
@@ -359,8 +389,8 @@ async def cmd_app(update, context):
         await update.effective_message.reply_text("مینی‌اپ هنوز تنظیم نشده (MINIAPP_URL یا دامنهٔ عمومی Railway لازمه).")
         return
     await update.effective_message.reply_text(
-        "📊 داشبورد مینی‌اپ", reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("باز کردن داشبورد", web_app=WebAppInfo(url=app_url()))]]))
+        "👤 پروفایل مینی‌اپ", reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("باز کردن پروفایل", web_app=WebAppInfo(url=app_url()))]]))
 
 
 def setup(app):
@@ -388,7 +418,7 @@ def setup(app):
 HTML = r"""<!doctype html>
 <html lang="fa" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
-<title>داشبورد</title>
+<title>پروفایل</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:var(--tg-theme-bg-color,#fff);--tx:var(--tg-theme-text-color,#111);--hint:var(--tg-theme-hint-color,#707579);
@@ -567,15 +597,58 @@ background:conic-gradient(from 0deg,var(--ac1),var(--ac2),var(--ac1));-webkit-ma
 .shine{position:relative;overflow:hidden}
 .shine::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);animation:sh2 4.5s infinite}
 @keyframes sh2{0%,60%{left:-60%}100%{left:130%}}
+
+/* ================= پروفایل + دکمه‌های خفن + آیکن‌های ویژه ================= */
+.ico{width:1.2em;height:1.2em;vertical-align:-.22em;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 4px rgba(25,211,255,.5))}
+.ei{display:inline-flex;align-items:center;justify-content:center;line-height:1}
+button .ico,.mini.p .ico,.seg a.on .ico,.chipsel a.on .ico,.slh .n .ico,.sw .ico{stroke:#fff;filter:drop-shadow(0 0 3px rgba(255,255,255,.5))}
+.mini{display:inline-flex;align-items:center;gap:6px}
+button{position:relative;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid rgba(255,255,255,.2);
+ background-size:200% 200%;animation:bgm 7s ease-in-out infinite;letter-spacing:.2px;text-shadow:0 1px 8px rgba(0,0,0,.35)}
+button::after{content:"";position:absolute;top:0;left:-70%;width:38%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.32),transparent);transform:skewX(-20deg);animation:sh2 5.5s infinite;pointer-events:none}
+button.alt{animation:none;text-shadow:none}button.alt::after,button:disabled::after,.dk button::after{display:none}
+button.alt .ico{stroke:url(#gr)}
+@keyframes bgm{0%,100%{background-position:0 50%}50%{background-position:100% 50%}}
+.tabs{left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));padding:6px;gap:4px;border-radius:24px;border:1px solid var(--line);
+ box-shadow:0 12px 36px rgba(0,0,0,.6),0 0 26px rgba(124,92,255,.22)}
+.tabs a{border-radius:18px;padding:8px 0 6px;transition:.25s;font-weight:600}
+.tabs a i .ico,.tabs a .ico{width:25px;height:25px;opacity:.75}
+.tabs a.on{background:linear-gradient(160deg,rgba(124,92,255,.38),rgba(25,211,255,.18));box-shadow:inset 0 0 0 1px rgba(124,92,255,.55),0 0 20px rgba(124,92,255,.4)}
+.tabs a.on .ico{opacity:1;stroke:#fff;filter:drop-shadow(0 0 6px rgba(25,211,255,.9))}
+body{padding-bottom:calc(104px + env(safe-area-inset-bottom))}
+h1{display:flex;align-items:center;gap:8px;font-size:19px}h1 .ico{width:24px;height:24px}
+
+.phero{position:relative;overflow:hidden;text-align:center;padding:22px 14px 16px;border-radius:26px;border:1px solid var(--line);
+ background:linear-gradient(160deg,rgba(124,92,255,.3),rgba(25,211,255,.1) 55%,rgba(18,25,51,.92))}
+.phero::before{content:"";position:absolute;width:220px;height:220px;right:-70px;top:-90px;border-radius:50%;background:radial-gradient(closest-side,rgba(25,211,255,.28),transparent)}
+.pav{position:relative;width:92px;height:92px;margin:0 auto 10px;border-radius:50%;display:grid;place-items:center;font-size:40px;font-weight:800;color:#fff;
+ background:linear-gradient(135deg,var(--ac1),var(--ac2));box-shadow:0 0 0 4px rgba(255,255,255,.07),0 0 30px rgba(124,92,255,.6)}
+.pav.on{animation:pulse 2.6s ease-in-out infinite}
+.phero h2{position:relative;margin:0;font-size:20px}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.pc{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:12px;min-width:0}
+.pc.hl{background:linear-gradient(150deg,rgba(124,92,255,.3),var(--card));border-color:rgba(124,92,255,.5);box-shadow:0 0 24px rgba(124,92,255,.2)}
+.pc.cp{cursor:pointer}.pc.cp:active{transform:scale(.98)}
+.pi{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;flex:none;background:linear-gradient(135deg,rgba(124,92,255,.38),rgba(25,211,255,.2));box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.pi .ico{width:23px;height:23px}
+.pt{min-width:0;flex:1}.pt span{display:block;color:var(--hint);font-size:11.5px}
+.pt b{display:block;font-size:15px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ptime{margin-top:10px;background:linear-gradient(150deg,rgba(25,211,255,.14),var(--card));border:1px solid rgba(25,211,255,.3);border-radius:20px;padding:14px}
+.ptime .top2{display:flex;align-items:center;gap:10px}
+.ptime .top2 b{display:block;font-size:17px;margin-top:2px}
+.bar{height:8px;border-radius:99px;background:rgba(255,255,255,.08);margin-top:12px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--ac1),var(--ac2));box-shadow:0 0 12px rgba(25,211,255,.7)}
+.ptime small{display:block;color:var(--hint);font-size:11.5px;margin-top:8px;line-height:1.7}
 </style></head><body>
-<h1 id="ttl">📊 داشبورد</h1>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b69cff"/><stop offset="1" stop-color="#19d3ff"/></linearGradient></defs></svg>
+<h1 id="ttl">👤 پروفایل</h1>
 <div id="v" class="skel"><div class="hero"><div class="n">…</div><div class="l">در حال بارگذاری</div></div></div>
 <div id="gl" style="display:none"></div>
 <div id="sf" style="display:none"></div>
 <div id="g" style="display:none"></div>
 <div class="shw" id="shw"><div class="shb" id="sh"></div></div>
 <div class="toast" id="toast"></div>
-<div class="tabs" id="tabs"><a data-t="dash" class="on"><i>📊</i>داشبورد</a><a data-t="games"><i>🎮</i>بازی‌ها</a><a data-t="self"><i>⚡</i>سلف</a></div>
+<div class="tabs" id="tabs"><a data-t="dash" class="on"><i>👤</i>پروفایل</a><a data-t="games"><i>🎮</i>بازی‌ها</a><a data-t="self"><i>⚡</i>سلف</a></div>
 <script>
 const SNK=__SNK__;
 const tg=window.Telegram&&Telegram.WebApp;if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#090d1b");tg.setBackgroundColor("#090d1b");tg.setBottomBarColor&&tg.setBottomBarColor("#0e1328")}catch(e){}}
@@ -587,15 +660,88 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function span(h){const d=Math.floor(h/24),x=h%24;return (d?fa(d)+" روز و ":"")+fa(x)+" ساعت"}
 const E={low_balance:"الماس کافی نداری؛ اول شارژ کن.",not_member:"اول باید عضو کانال‌ها بشی (داخل ربات).",rate:"کمی صبر کن و دوباره امتحان کن.",auth:"نشست منقضی شده؛ مینی‌اپ رو دوباره باز کن."};
 async function api(p,b){const r=await fetch(p,{method:"POST",headers:{"Authorization":"tma "+init,"Content-Type":"application/json"},body:JSON.stringify(b||{})});
- const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(E[j.error]||"خطا در ارتباط با سرور");return j}
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(E[j.error]||("خطا در ارتباط با سرور ("+r.status+")"));return j}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function haptic(k){try{tg&&tg.HapticFeedback&&(k==="light"?tg.HapticFeedback.impactOccurred("light"):tg.HapticFeedback.notificationOccurred(k))}catch(e){}}
 let _tt=null;
 function toast(t,ms){const e=$("toast");e.textContent=t;e.style.display="block";clearTimeout(_tt);_tt=setTimeout(()=>e.style.display="none",ms||2600)}
 
+
+/* ---------- آیکن‌های ویژه به‌جای ایموجی معمولی ---------- */
+const IC={
+chart:'<path d="M5 20v-7M12 20V5M19 20v-11"/>',
+user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c.6-4 4-6 8-6s7.4 2 8 6"/>',
+users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.5-3.5 3.2-5.5 6.5-5.5s6 2 6.5 5.5"/><path d="M16 4.7a3.5 3.5 0 010 6.6M18 14.8c2 .6 3.3 2.4 3.5 5.2"/>',
+gamepad:'<rect x="2.5" y="7" width="19" height="11" rx="5"/><path d="M8 10.5v4M6 12.5h4"/><circle cx="15.5" cy="11.5" r=".9"/><circle cx="18" cy="14" r=".9"/>',
+bolt:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+gem:'<path d="M6 3h12l4 6-10 12L2 9z"/><path d="M2 9h20M9 3l3 6 3-6M12 21L9 9M12 21l3-12"/>',
+gift:'<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v8a1 1 0 001 1h12a1 1 0 001-1v-8M8 8a2.5 2.5 0 110-5c2 0 4 2.5 4 5 0-2.5 2-5 4-5a2.5 2.5 0 110 5"/>',
+link:'<path d="M10 14a4.5 4.5 0 006.4 0l3-3a4.5 4.5 0 00-6.4-6.4l-1 1M14 10a4.5 4.5 0 00-6.4 0l-3 3a4.5 4.5 0 006.4 6.4l1-1"/>',
+plug:'<path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 01-12 0zM12 17v5"/>',
+check:'<circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-7"/>',
+alert:'<path d="M12 3L2 20h20z"/><path d="M12 10v5M12 17.8v.2"/>',
+ban:'<circle cx="12" cy="12" r="9.5"/><path d="M5.5 5.5l13 13"/>',
+lock:'<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 018 0v2.5"/>',
+clock:'<circle cx="12" cy="12" r="9.5"/><path d="M12 7v5l3.5 2"/>',
+hourglass:'<path d="M6 2.5h12M6 21.5h12M7 2.5c0 5 5 6 5 9.5s-5 4.5-5 9.5M17 2.5c0 5-5 6-5 9.5s5 4.5 5 9.5"/>',
+id:'<rect x="2.5" y="5" width="19" height="14" rx="3"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.5-1.7 1.7-2.5 3-2.5s2.5.8 3 2.5M14 10h5M14 14h4"/>',
+at:'<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 006 0v-1a10 10 0 10-4 8"/>',
+plus:'<path d="M12 5v14M5 12h14"/>',
+trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+edit:'<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 013 3L8 19z"/>',
+speaker:'<path d="M4 9.5v5h4l5 4v-13l-5 4z"/><path d="M16.5 9a4 4 0 010 6M19 6.5a7.5 7.5 0 010 11"/>',
+mute:'<path d="M4 9.5v5h4l5 4v-13l-5 4z"/><path d="M17 9.5l5 5M22 9.5l-5 5"/>',
+chat:'<path d="M4 5h16a1.5 1.5 0 011.5 1.5v9A1.5 1.5 0 0120 17h-8l-5 4v-4H4a1.5 1.5 0 01-1.5-1.5v-9A1.5 1.5 0 014 5z"/>',
+bot:'<rect x="4" y="8" width="16" height="12" rx="4"/><path d="M12 8V4M9 14v1M15 14v1M2 13v3M22 13v3"/>',
+dice:'<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><circle cx="8.5" cy="8.5" r="1"/><circle cx="15.5" cy="8.5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="8.5" cy="15.5" r="1"/><circle cx="15.5" cy="15.5" r="1"/>',
+palette:'<path d="M12 3a9 9 0 100 18c1.5 0 2-1 1.5-2.2-.6-1.3.2-2.3 1.6-2.3H17a4 4 0 004-4c0-5-4-9.5-9-9.5z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/>',
+snake:'<path d="M5 20c-2-3 0-6 4-6s5-3 3-6 1-5 5-4M17 4l2.5 1.5L17 7"/>',
+ladder:'<path d="M7 3v18M17 3v18M7 7h10M7 12h10M7 17h10"/>',
+trophy:'<path d="M8 4h8v6a4 4 0 01-8 0zM8 6H4v1a4 4 0 004 4M16 6h4v1a4 4 0 01-4 4M12 14v4M8 21h8M10 18h4"/>',
+flag:'<path d="M5 21V4M5 4h12l-2 4 2 4H5"/>',
+target:'<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+shield:'<path d="M12 2.5l8 3v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10v-6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+search:'<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>',
+note:'<path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/>',
+mega:'<path d="M3 10v4h3l9 5V5L6 10zM18.5 9a4 4 0 010 6"/>',
+font:'<path d="M5 20l7-16 7 16M8 14h8"/>',
+eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/>',
+brief:'<rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M9 7V4.5h6V7M3 13h18"/>',
+book:'<path d="M4 21.5V4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5z"/>',
+pin:'<path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+x:'<circle cx="12" cy="12" r="9.5"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/>',
+dot:'<circle cx="12" cy="12" r="5"/>',
+heart:'<path d="M12 21s-8.5-5.2-8.5-11A4.8 4.8 0 0112 7a4.8 4.8 0 018.5 3c0 5.8-8.5 11-8.5 11z"/>',
+wallet:'<path d="M3 7.5A2.5 2.5 0 015.5 5H19v14H5.5A2.5 2.5 0 013 16.5z"/><path d="M19 9h2v6h-2a3 3 0 010-6z"/>',
+power:'<path d="M12 3v9M6.5 6.5a8 8 0 1011 0"/>',
+flame:'<path d="M12 22c4 0 7-2.8 7-7 0-3-2-5-3.5-7-.4 2-1.5 3-3 3 0-3-1.5-5.5-4-7 0 3-3.5 5-3.5 10 0 4.2 3 8 7 8z"/>'
+};
+const EMAP={"📊":"chart","👤":"user","🎮":"gamepad","⚡":"bolt","💎":"gem","🎁":"gift","🔗":"link","🔌":"plug","✅":"check","⚠️":"alert","⚠":"alert",
+"⛔":"ban","🔒":"lock","🕒":"clock","⏳":"hourglass","⏹":"power","🆔":"id","👥":"users","➕":"plus","🗑":"trash","✏️":"edit","✏":"edit","🔊":"speaker",
+"🔇":"mute","💬":"chat","🤖":"bot","🎲":"dice","🎨":"palette","🐍":"snake","🪜":"ladder","🏆":"trophy","🏁":"flag","🎯":"target","🛡":"shield",
+"🔎":"search","📝":"note","📢":"mega","📣":"mega","🔤":"font","👀":"eye","🛠":"gear","🧰":"gear","⚙️":"gear","⚙":"gear","💼":"brief","📚":"book",
+"📍":"pin","❌":"x","🟢":"dot","💕":"heart","🔥":"flame","💰":"wallet"};
+function icon(n){return IC[n]?`<svg class="ico" viewBox="0 0 24 24" stroke="url(#gr)" aria-hidden="true">${IC[n]}</svg>`:""}
+const EKEYS=Object.keys(EMAP).sort((a,b)=>b.length-a.length);
+const ERT=new RegExp(EKEYS.join("|")),ERE=new RegExp(EKEYS.join("|"),"g");
+const ESKIP="textarea,input,script,style,svg,.sm1,.noem";
+function swapNode(tn){
+ const v=tn.nodeValue;if(!v||!ERT.test(v))return;
+ const p=tn.parentNode;if(!p||(p.closest&&p.closest(ESKIP)))return;
+ const f=document.createDocumentFragment();let last=0,m;ERE.lastIndex=0;
+ while((m=ERE.exec(v))){if(m.index>last)f.appendChild(document.createTextNode(v.slice(last,m.index)));
+  const s=document.createElement("span");s.className="ei";s.innerHTML=icon(EMAP[m[0]]);f.appendChild(s);last=m.index+m[0].length}
+ if(last<v.length)f.appendChild(document.createTextNode(v.slice(last)));
+ p.replaceChild(f,tn)}
+function swapScan(root){const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),a=[];let n;while((n=w.nextNode()))a.push(n);a.forEach(swapNode)}
+let _swq=0;const _mo=new MutationObserver(()=>{if(_swq)return;_swq=requestAnimationFrame(()=>{_swq=0;_mo.disconnect();try{swapScan(document.body)}catch(e){}_mo.observe(document.body,{childList:true,subtree:true,characterData:true})})});
+try{swapScan(document.body)}catch(e){}_mo.observe(document.body,{childList:true,subtree:true,characterData:true});
+function cp(v){try{navigator.clipboard&&navigator.clipboard.writeText(String(v))}catch(e){}haptic("success");toast("کپی شد ✅")}
+
 /* ---------- تب‌ها ---------- */
 let ME=null,VIEW="dash",busy=false;
-const TT={dash:"📊 داشبورد",games:"🎮 بازی‌ها",self:"⚡ سلف"};
+const TT={dash:"👤 پروفایل",games:"🎮 بازی‌ها",self:"⚡ سلف"};
 const PANES={dash:"v",games:"gl",self:"sf"};
 function showTab(t){VIEW=t;document.body.classList.remove("ing");$("g").style.display="none";
  for(const k in PANES)$(PANES[k]).style.display=(k===t)?"block":"none";
@@ -604,27 +750,40 @@ function showTab(t){VIEW=t;document.body.classList.remove("ing");$("g").style.di
 document.querySelectorAll(".tabs a").forEach(a=>a.onclick=()=>{if(a.dataset.t!==VIEW||$("g").style.display==="block"){stopGame();showTab(a.dataset.t)}});
 function msg(t){document.querySelectorAll(".nm").forEach(m=>{m.textContent=t;m.style.display=t?"block":"none"})}
 
-/* ---------- داشبورد ---------- */
+/* ---------- پروفایل ---------- */
 function renderAll(s,note){ME=s;renderDash(s,note);renderGames(s);renderSelf(s,note)}
 function noteBox(note){return `<div class="msg nm" style="display:${note?"block":"none"}">${note||""}</div>`}
-function toggleBtn(s){return `<button class="tgl ${s.on?"red":""}">${s.on?"خاموش کردن سلف":"روشن کردن سلف ("+fa(s.activate_cost)+" الماس)"}</button>`}
+function toggleBtn(s){return `<button class="tgl ${s.on?"red":""}">${s.on?"⏹ خاموش کردن سلف":"⚡ روشن کردن سلف ("+fa(s.activate_cost)+" الماس)"}</button>`}
 function bindTgl(){document.querySelectorAll(".tgl").forEach(b=>b.onclick=()=>flip())}
+function pcard(ic,l,v,cls,extra){return `<div class="pc ${cls||""}" ${extra||""}><div class="pi">${icon(ic)}</div><div class="pt"><span>${l}</span><b>${v}</b></div></div>`}
 function renderDash(s,note){
  const warn=s.on&&s.hours<24?`<div class="msg">⚠️ شارژت کمتر از ${fa(Math.max(s.hours,1))} ساعت کافیه.</div>`:"";
  const conn=s.on&&!s.connected?`<div class="msg">اکانتت هنوز وصل نشده؛ از داخل ربات «ورود به اکانت» رو بزن.</div>`:"";
+ const nm=s.name||(s.username?"@"+s.username:"کاربر");
+ const ch=(String(nm).replace(/^@/,"").trim()[0]||"U").toUpperCase();
+ const un=s.username?"@"+s.username:"ندارد";
+ const left=(s.days_left>0?fa(s.days_left)+" روز و ":"")+fa(s.hours_left)+" ساعت";
+ const pct=Math.max(3,Math.min(100,Math.round(s.hours/7.2)));
+ const trial=s.trial_days_left>0?`<small>🎁 هدیهٔ رایگان: ${fa(s.trial_days_left)} روز دیگه فعاله</small>`:"";
  $("v").className="";
  $("v").innerHTML=`
- <div class="hero"><div class="n">💎 ${fa(s.balance)}</div><div class="l">≈ ${num(s.toman)} تومان</div>
- <span class="pill ${s.on?"on":"off"}">${s.on?"سلف روشن ✅":"سلف خاموش ⏹"}</span></div>
- <div class="grid"><div class="c"><span>مصرف‌شده</span><b>${fa(s.spent)}</b></div>
- <div class="c"><span>کسر ساعتی</span><b>${fa(s.rate)} الماس</b></div></div>
- <div class="row"><span>⏳ باقی‌مانده</span><span>${span(s.hours)}</span></div>
- <div class="row"><span>🎁 هدیهٔ شروع</span><span>${s.gift_received?"دریافت شد ("+fa(s.gift_amount)+")":"هنوز نه"}</span></div>
- <div class="row"><span>🔗 اتصال اکانت</span><span>${s.connected?"وصل ✅":"وصل نیست"}</span></div>
- <div class="row"><span>🆔 آیدی</span><span class="id" onclick="navigator.clipboard&&navigator.clipboard.writeText('${s.id}');haptic('success')">${s.id}</span></div>
+ <div class="phero"><div class="pav ${s.on?"on":""}"><span>${esc(ch)}</span></div><h2>${esc(nm)}</h2>
+  <div class="chips"><span class="chip ${s.on?"g":"r"}">${s.on?"⚡ سلف روشن":"⏹ سلف خاموش"}</span>
+  <span class="chip ${s.connected?"g":"y"}">${s.connected?"🔌 اکانت وصل":"🔌 اکانت وصل نیست"}</span></div></div>
+ <div class="pgrid">
+  ${pcard("gem","موجودی الماس",fa(s.balance),"hl")}
+  ${pcard("flame","الماس مصرف‌شده",fa(s.spent))}
+  ${pcard("wallet","موجودی تومانی",num(s.toman)+" تومان")}
+  ${pcard("users","تعداد رفرال",fa(s.referrals))}
+  ${pcard("at","یوزرنیم",`<span class="id">${esc(un)}</span>`,s.username?"cp":"",s.username?`onclick="cp('${esc(s.username)}')"`:"")}
+  ${pcard("id","آیدی عددی",`<span class="id">${s.id}</span>`,"cp",`onclick="cp('${s.id}')"`)}
+ </div>
+ <div class="ptime"><div class="top2"><div class="pi">${icon("hourglass")}</div><div class="pt"><span>باقی‌مانده</span><b>${left}</b></div></div>
+  <div class="bar"><i style="width:${pct}%"></i></div>
+  <small>با کسر ${fa(s.rate)} الماس در ساعت (${s.on?"سلف روشنه":"سلف خاموشه"})</small>${trial}</div>
  ${warn}${conn}
  ${toggleBtn(s)}
- <button class="alt" id="b">خرید الماس / بازگشت به ربات</button>
+ <button class="alt" id="b">💎 خرید الماس / بازگشت به ربات</button>
  ${noteBox(note)}`;
  $("b").onclick=()=>tg&&tg.close();bindTgl();
 }
@@ -846,7 +1005,7 @@ async function loadStickerPacks(){
   b.disabled=true;b.textContent="در حال افزودن…";
   try{const r=await api("/api/snk/pack_add",{url:v});
    if(r.ok){toast("✅ پک اضافه شد: "+r.title);$("sturl").value="";await loadStickerPacks()}
-   else toast(({bad_pack_link:"لینک پک معتبر نیست.",pack_not_found:"پک پیدا نشد یا ربات به آن دسترسی ندارد.",empty_pack:"این پک استیکری ندارد."})[r.error]||"افزودن پک ناموفق بود.")
+   else toast(({bad_pack_link:"لینک پک معتبر نیست.",pack_not_found:"پک پیدا نشد؛ لینک رو دوباره کپی کن.",empty_pack:"این پک استیکری ندارد.",tg_timeout:"تلگرام دیر جواب داد؛ دوباره امتحان کن.",tg_error:"تلگرام جواب نداد؛ کمی بعد دوباره امتحان کن.",db_error:"ذخیره پک ناموفق بود؛ دوباره امتحان کن.",internal:"مشکل موقتی سرور؛ دوباره امتحان کن."})[r.error]||"افزودن پک ناموفق بود.")
   }catch(e){toast(e.message)}finally{b.disabled=false;b.textContent="➕ افزودن پک استیکر"}
  };
 }

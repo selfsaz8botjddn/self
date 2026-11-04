@@ -498,17 +498,28 @@ async def api(path, uid, data):
             s.close()
     if path == "/api/snk/pack_add":
         raw = str(data.get("url") or "").strip()
-        mt = re.search(r"(?:t\.me|telegram\.me)/(?:addstickers|stickers)/([A-Za-z0-9_]{3,64})", raw)
+        mt = (re.search(r"(?:t\.me|telegram\.me|telegram\.dog)/(?:addstickers|stickers|addemoji)/([A-Za-z0-9_]{3,64})", raw)
+              or re.search(r"tg://(?:addstickers|addemoji)\?set=([A-Za-z0-9_]{3,64})", raw)
+              or re.fullmatch(r"@?([A-Za-z0-9_]{3,64})", raw))
         if not mt:
             return {"error": "bad_pack_link"}
         pack_name = mt.group(1)
         try:
-            st = await _app[0].bot.get_sticker_set(pack_name)
-            stickers = [{"file_id": x.file_id, "emoji": x.emoji or "🙂",
-                         "animated": bool(x.is_animated), "video": bool(x.is_video)}
-                        for x in st.stickers[:120]]
-            if not stickers:
-                return {"error": "empty_pack"}
+            st = await asyncio.wait_for(_app[0].bot.get_sticker_set(pack_name), timeout=15)
+        except asyncio.TimeoutError:
+            return {"error": "tg_timeout"}
+        except Exception as e:
+            logger.info("snakes sticker pack load failed: %s", e)
+            msg = str(e).lower()
+            if "invalid" in msg or "not found" in msg or "stickerset" in msg:
+                return {"error": "pack_not_found"}
+            return {"error": "tg_error"}
+        stickers = [{"file_id": x.file_id, "emoji": x.emoji or "🙂",
+                     "animated": bool(x.is_animated), "video": bool(x.is_video)}
+                    for x in st.stickers[:120]]
+        if not stickers:
+            return {"error": "empty_pack"}
+        try:
             s = get_session()
             try:
                 old = s.query(StickerPack).filter(StickerPack.owner_id == uid,
@@ -521,10 +532,10 @@ async def api(path, uid, data):
                 s.commit()
             finally:
                 s.close()
-            return {"ok": True, "title": st.title, "count": len(stickers)}
-        except Exception as e:
-            logger.info("snakes sticker pack load failed: %s", e)
-            return {"error": "pack_not_found"}
+        except Exception:
+            logger.exception("snakes: saving sticker pack failed")
+            return {"error": "db_error"}
+        return {"ok": True, "title": st.title, "count": len(stickers)}
     if path == "/api/snk/chat":
         if not g or not any(p["id"] == uid for p in g["players"]):
             return {"error": "not_player"}
