@@ -18,6 +18,7 @@
 نصب: miniapp.setup(app) این ماژول رو خودش نصب می‌کنه؛ تغییر main.py لازم نیست.
 """
 import asyncio
+import gzip
 import html
 import io
 import json
@@ -803,6 +804,38 @@ async def api(path, uid, data):
         res = {"game": state_for(g, uid, data)}
     if err:
         res["error"] = err
+    return res
+
+
+# ---------- فایل استیکر برای نمایش توی مینی‌اپ ----------
+_STK_CACHE = {}
+
+
+async def sticker_file(fid):
+    """(bytes, content-type) یا None. فقط استیکرهایی که توی پیام‌های بازی‌های فعال هستن سرو می‌شن.
+    .tgs (متحرک) سمت سرور باز می‌شه و به‌صورت JSON برای lottie می‌ره."""
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{10,250}", fid or ""):
+        return None
+    if fid in _STK_CACHE:
+        return _STK_CACHE[fid]
+    if not any(m.get("file_id") == fid for g in list(GAMES.values()) for m in (g.get("messages") or [])):
+        return None
+    try:
+        f = await _app[0].bot.get_file(fid)
+        data = bytes(await f.download_as_bytearray())
+        path = (f.file_path or "").lower()
+        if path.endswith(".tgs"):
+            res = (gzip.decompress(data), "application/json")
+        elif path.endswith(".webm"):
+            res = (data, "video/webm")
+        else:
+            res = (data, "image/webp")
+    except Exception:
+        logger.info("draw: sticker fetch failed", exc_info=True)
+        return None
+    if len(_STK_CACHE) > 150:
+        _STK_CACHE.clear()
+    _STK_CACHE[fid] = res
     return res
 
 

@@ -173,7 +173,8 @@ def build_chat_msg(uid, name, data, spec=False):
             chosen = stickers[ix]
         finally:
             s.close()
-        msg.update({"kind": "sticker", "file_id": chosen["file_id"], "emoji": chosen.get("emoji", "🙂")})
+        msg.update({"kind": "sticker", "file_id": chosen["file_id"], "emoji": chosen.get("emoji", "🙂"),
+                    "animated": bool(chosen.get("animated")), "video": bool(chosen.get("video"))})
     else:
         return None, "bad_request"
     if len(_CHAT_LAST) > 5000:

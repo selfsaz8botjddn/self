@@ -230,7 +230,7 @@ def _resp(code, body, ctype="application/json; charset=utf-8", cache="no-store")
     b = body.encode() if isinstance(body, str) else body
     head = (f"HTTP/1.1 {code} {_STATUS.get(code, 'OK')}\r\nContent-Type: {ctype}\r\nContent-Length: {len(b)}\r\n"
             f"Cache-Control: {cache}\r\nX-Content-Type-Options: nosniff\r\n"
-            "Content-Security-Policy: default-src 'self' https://telegram.org; script-src 'self' 'unsafe-inline' https://telegram.org; "
+            "Content-Security-Policy: default-src 'self' https://telegram.org; script-src 'self' 'unsafe-inline' https://telegram.org https://cdnjs.cloudflare.com; "
             "style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org\r\n"
             "Connection: close\r\n\r\n")
     return head.encode() + b
@@ -268,6 +268,12 @@ async def _route(method, path, headers, body):
         return _resp(200, {"ok": True})
     if path in ("/", "/app"):
         return _resp(200, _page(), "text/html; charset=utf-8")
+    if path.startswith("/sticker/"):
+        import drawgame
+        r = await drawgame.sticker_file(path[9:].rsplit(".", 1)[0])
+        if not r:
+            return _resp(404, {"error": "not_found"})
+        return _resp(200, r[0], r[1], cache="public, max-age=3600")
     if path == "/board.webp":
         b = _board_bytes()
         if not b:
@@ -723,10 +729,11 @@ h1{display:flex;align-items:center;gap:8px;font-size:19px}h1 .ico{width:24px;hei
 .dpl{position:relative}
 .bubw{position:absolute;left:50%;bottom:calc(100% - 2px);width:0;height:0;z-index:9;pointer-events:none}
 .bub{position:absolute;bottom:0;left:-14px;width:112px;height:103px;transform-origin:50% 100%;animation:bpop .38s cubic-bezier(.2,1.5,.4,1)}
-.bub.nopop{animation:none}.bub.out{animation:bout .25s ease-in forwards}
+.bub.big{width:160px;height:147px}.bub.nopop{animation:none}.bub.out{animation:bout .25s ease-in forwards}
 .bub svg{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.45))}
 .bub.flip svg{transform:scaleX(-1)}
 .bub .bin{position:absolute;left:14%;right:12%;top:12%;height:52%;display:flex;align-items:center;justify-content:center;text-align:center;color:#17261c;font-weight:800;font-size:11px;line-height:1.35;overflow:hidden;direction:rtl}
+.bub .stk{width:74px;height:74px;object-fit:contain;display:block}.bub .lot{width:74px;height:74px}
 .bub .bem{font-size:36px;line-height:1;animation:bwig 1.1s ease-in-out infinite}
 @keyframes bpop{0%{opacity:0;transform:scale(.3)}100%{opacity:1;transform:scale(1)}}
 @keyframes bout{to{opacity:0;transform:translateY(-8px) scale(.9)}}
@@ -1434,12 +1441,19 @@ async function drChat(payload){
 }
 const CLOUDSH='<ellipse cx="228" cy="195" rx="195" ry="112"/><circle cx="150" cy="105" r="75"/><circle cx="262" cy="88" r="68"/><circle cx="365" cy="95" r="62"/><circle cx="405" cy="170" r="55"/><circle cx="85" cy="170" r="58"/><circle cx="100" cy="255" r="55"/><circle cx="195" cy="275" r="58"/><circle cx="315" cy="275" r="55"/><circle cx="385" cy="235" r="55"/>';
 const CLOUDSVG='<svg viewBox="0 -10 490 450" xmlns="http://www.w3.org/2000/svg"><g fill="#2bff9b" stroke="#2bff9b" stroke-width="46" stroke-linejoin="round">'+CLOUDSH+'</g><g fill="#fdffe8">'+CLOUDSH+'</g><ellipse cx="100" cy="350" rx="46" ry="29" fill="#2bff9b"/><ellipse cx="100" cy="350" rx="24" ry="6" fill="#fdffe8"/><ellipse cx="48" cy="402" rx="30" ry="22" fill="#2bff9b"/></svg>';
+let LOTP=null;
+function lotLoad(){return LOTP||(LOTP=new Promise((ok,no)=>{if(window.lottie)return ok(window.lottie);const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie_light.min.js";s.onload=()=>ok(window.lottie);s.onerror=()=>{LOTP=null;no()};document.head.appendChild(s)}))}
+function drStkHTML(m){
+ const e=esc(m.emoji||"🙂"),f=encodeURIComponent(m.file_id||""),fb="this.outerHTML='<div class=bem>'+this.dataset.e+'</div>'";
+ if(m.animated)return `<div class="lot" data-f="${f}" data-e="${e}"></div>`;
+ if(m.video)return `<video class="stk" src="/sticker/${f}.webm" autoplay loop muted playsinline data-e="${e}" onerror="${fb}"></video>`;
+ return `<img class="stk" src="/sticker/${f}.webp" data-e="${e}" onerror="${fb}">`}
 function drBubHTML(m){
- const inner=m.kind==="sticker"?`<div class="bem">${esc(m.emoji||"🙂")}</div>`:`<span>${esc(m.text||"")}</span>`;
+ const inner=m.kind==="sticker"?drStkHTML(m):`<span>${esc(m.text||"")}</span>`;
  return CLOUDSVG+`<div class="bin">${inner}</div>`}
 function drBubShow(m,ms){
  const D=DR;if(!D)return;
- D.bub[m.uid]={html:drBubHTML(m),until:Date.now()+ms,shown:false,key:m.at+"-"+m.uid};
+ D.bub[m.uid]={html:drBubHTML(m),big:m.kind==="sticker",until:Date.now()+ms,shown:false,key:m.at+"-"+m.uid};
  drBubSync()}
 function drBubSync(){
  const D=DR;if(!D)return;
@@ -1448,11 +1462,13 @@ function drBubSync(){
   if(!w)continue;
   const cur=w.firstElementChild;
   if(cur&&cur.dataset.k===b.key)continue;
-  w.innerHTML=`<div class="bub ${b.shown?"nopop":""}" data-k="${b.key}">${b.html}</div>`;
+  w.innerHTML=`<div class="bub ${b.shown?"nopop":""} ${b.big?"big":""}" data-k="${b.key}">${b.html}</div>`;
   const el=w.firstElementChild,cr=w.parentElement.getBoundingClientRect();
   const flip=(cr.left+cr.width/2)>window.innerWidth/2;
   el.classList.toggle("flip",flip);
-  let left=flip?-98:-14;el.style.left=left+"px";
+  let left=flip?-(el.offsetWidth-14):-14;el.style.left=left+"px";
+  const lt=el.querySelector(".lot");
+  if(lt)lotLoad().then(L=>{if(lt.isConnected)L.loadAnimation({container:lt,renderer:"svg",loop:true,autoplay:true,path:"/sticker/"+lt.dataset.f+".json"})}).catch(()=>{lt.className="bem";lt.textContent=lt.dataset.e});
   const r=el.getBoundingClientRect();
   if(r.left<6)left+=6-r.left;else if(r.right>window.innerWidth-6)left-=r.right-(window.innerWidth-6);
   el.style.left=left+"px";b.shown=true}}
