@@ -73,9 +73,113 @@ class StickerPack(Base):
     stickers = Column(Text, nullable=False, default="[]")
 
 
+class GlobalPack(Base):
+    """پک استیکر/ایموجی همگانی: پشتیبانی اضافه می‌کنه و همهٔ کاربرها توی چت بازی‌ها می‌تونن بفرستن."""
+    __tablename__ = "game_global_packs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    added_by = Column(BigInteger, nullable=False, default=0)
+    name = Column(String(64), nullable=False, index=True)
+    title = Column(String(128), nullable=False)
+    stickers = Column(Text, nullable=False, default="[]")
+
+
 def _cm():
     import commerce
     return commerce
+
+
+WATCH = {}            # کلید بازی -> {uid: آخرین زمان دیده‌شدن}؛ فقط توی حافظه
+_CHAT_LAST = {}       # uid -> زمان آخرین پیام چت (ضد اسپم)
+
+
+def touch_watch(key, uid):
+    WATCH.setdefault(key, {})[uid] = time.time()
+
+
+def watchers(key):
+    now = time.time()
+    d = WATCH.get(key) or {}
+    for u in [u for u, t in d.items() if now - t > 15]:
+        d.pop(u, None)
+    return len(d)
+
+
+def is_staff(uid):
+    """ادمین‌ها، پشتیبان‌های قدیمی (SUPPORT_IDS) و اعضای جدول پشتیبان‌ها."""
+    try:
+        import selfbot
+        if uid in selfbot.ADMIN_IDS or uid in selfbot.SUPPORT_IDS:
+            return True
+        return _cm()._staff_row(uid) is not None
+    except Exception:
+        logger.exception("snakes: staff check failed")
+        return False
+
+
+def _pack_name(raw):
+    mt = (re.search(r"(?:t\.me|telegram\.me|telegram\.dog)/(?:addstickers|stickers|addemoji)/([A-Za-z0-9_]{3,64})", raw)
+          or re.search(r"tg://(?:addstickers|addemoji)\?set=([A-Za-z0-9_]{3,64})", raw)
+          or re.fullmatch(r"@?([A-Za-z0-9_]{3,64})", raw))
+    return mt.group(1) if mt else None
+
+
+async def _fetch_pack(pack_name):
+    """(title, stickers, error)"""
+    try:
+        st = await asyncio.wait_for(_app[0].bot.get_sticker_set(pack_name), timeout=15)
+    except asyncio.TimeoutError:
+        return None, None, "tg_timeout"
+    except Exception as e:
+        logger.info("snakes sticker pack load failed: %s", e)
+        msg = str(e).lower()
+        if "invalid" in msg or "not found" in msg or "stickerset" in msg:
+            return None, None, "pack_not_found"
+        return None, None, "tg_error"
+    stickers = [{"file_id": x.file_id, "emoji": x.emoji or "🙂",
+                 "animated": bool(x.is_animated), "video": bool(x.is_video)} for x in st.stickers[:120]]
+    if not stickers:
+        return None, None, "empty_pack"
+    return st.title, stickers, None
+
+
+def build_chat_msg(uid, name, data, spec=False):
+    """پیام چت (متن/استیکر شخصی/استیکر همگانی) رو می‌سازه؛ (msg, error). برای هر دو بازی مشترکه."""
+    nowf = time.time()
+    if nowf - _CHAT_LAST.get(uid, 0) < 1.0:
+        return None, "slow"
+    kind = str(data.get("kind") or "text")
+    msg = {"uid": uid, "name": ("👀 " if spec else "") + str(name or "کاربر")[:20], "at": _now(), "spec": bool(spec)}
+    if kind == "text":
+        value = " ".join(str(data.get("text") or "").split())[:300]
+        if not value:
+            return None, "empty_message"
+        msg.update({"kind": "text", "text": value})
+    elif kind == "sticker":
+        try:
+            pack_id, ix = int(data.get("pack_id")), int(data.get("index"))
+        except (TypeError, ValueError):
+            return None, "bad_sticker"
+        s = get_session()
+        try:
+            if data.get("g"):
+                pack = s.query(GlobalPack).filter(GlobalPack.id == pack_id).first()
+            else:
+                pack = s.query(StickerPack).filter(StickerPack.id == pack_id, StickerPack.owner_id == uid).first()
+            if not pack:
+                return None, "pack_not_found"
+            stickers = json.loads(pack.stickers)
+            if not 0 <= ix < len(stickers):
+                return None, "bad_sticker"
+            chosen = stickers[ix]
+        finally:
+            s.close()
+        msg.update({"kind": "sticker", "file_id": chosen["file_id"], "emoji": chosen.get("emoji", "🙂")})
+    else:
+        return None, "bad_request"
+    if len(_CHAT_LAST) > 5000:
+        _CHAT_LAST.clear()
+    _CHAT_LAST[uid] = nowf
+    return msg, None
 
 
 def _esc(s):
@@ -250,6 +354,13 @@ def _app_btn(g):
     return _btn("🎮 ورود به مینی‌اپ", callback_data=f"snk:app:{g['id']}", style="primary")
 
 
+def _watch_btn(g):
+    lk = _link()
+    if lk:
+        return _btn("👀 تماشا", url=f"{lk}?startapp=snk_{g['id']}")
+    return _btn("👀 تماشا", callback_data=f"snk:watch:{g['id']}")
+
+
 def _text(g):
     names = "\n".join(f"{i + 1}. {_esc(p['name'])}" + (" ⛔" if p["out"] else "") for i, p in enumerate(g["players"]))
     pot = g["bet"] * len(g["players"])
@@ -259,7 +370,7 @@ def _text(g):
         return (head + f"👥 بازیکنان ({len(g['players'])}/{MAX_PLAYERS}):\n{names}\n\n"
                 f"⏳ {left} ثانیه برای پیوستن (حداقل ۲ نفر). «پیوستن» رو بزن و بعد وارد مینی‌اپ شو.")
     if g["status"] == "playing":
-        return head + f"👥 بازیکنان:\n{names}\n\n🎮 بازی شروع شده؛ از «ورود به مینی‌اپ» بازی کن."
+        return head + f"👥 بازیکنان:\n{names}\n\n🎮 بازی شروع شده؛ از «ورود به مینی‌اپ» بازی کن یا با «👀 تماشا» ببین."
     if g["status"] == "done":
         w = next((p for p in g["players"] if p["id"] == g.get("winner")), None)
         return (head + f"👥 بازیکنان:\n{names}\n\n🏆 برنده: <b>{_esc(w['name']) if w else '—'}</b>\n"
@@ -277,7 +388,7 @@ def _kb(g):
                                      [_btn("▶️ شروع بازی", callback_data=f"snk:go:{gid}"),
                                       _btn("لغو", callback_data=f"snk:x:{gid}", style="danger")]])
     if g["status"] == "playing":
-        return InlineKeyboardMarkup([[_app_btn(g)]])
+        return InlineKeyboardMarkup([[_app_btn(g), _watch_btn(g)]])
     return None
 
 
@@ -418,6 +529,15 @@ async def cb(update, context):
         g = GAMES.get(gid)
         if not g:
             note, alert = "این بازی دیگه فعال نیست.", True
+        elif act == "watch":
+            if g["status"] not in ("lobby", "playing"):
+                note, alert = "این بازی تموم شده.", True
+            else:
+                try:
+                    await context.bot.send_message(uid, "👀 مار و پله — برای تماشا دکمهٔ زیر رو بزن 👇", reply_markup=_open_kb(gid))
+                    note = "لینک تماشا به پیوی ربات فرستاده شد 👌"
+                except Exception:
+                    note, alert = "اول ربات رو توی پیوی استارت کن (/start) و دوباره بزن.", True
         elif act == "app":
             if not any(p["id"] == uid for p in g["players"]):
                 note, alert = ("اول «پیوستن» رو بزن." if g["status"] == "lobby" else "این بازی شروع شده و تو توش نیستی."), True
@@ -488,6 +608,7 @@ def state_for(g, uid):
         "turn_sec": TURN_SEC, "last": g.get("last"), "log": g["log"][-6:], "winner": g.get("winner"),
         "payout": g.get("payout"), "tax": g.get("tax"), "seq": g["seq"],
         "snakes": SNAKES, "ladders": LADDERS, "chat": (g.get("messages") or [])[-30:],
+        "spec": not any(p["id"] == uid for p in g["players"]), "watchers": watchers(f"s{g['id']}"),
     }
 
 
@@ -499,10 +620,68 @@ def active_summary(uid):
 async def api(path, uid, data):
     gid = data.get("gid")
     g = GAMES.get(gid) if isinstance(gid, int) and not isinstance(gid, bool) else None
-    if g and path not in ("/api/snk/packs", "/api/snk/pack_add") and not any(p["id"] == uid for p in g["players"]):
+    is_pl = bool(g and any(p["id"] == uid for p in g["players"]))
+    open_paths = ("/api/snk/packs", "/api/snk/pack_add", "/api/snk/gpacks", "/api/snk/gpack_add",
+                  "/api/snk/gpack_del", "/api/snk/state", "/api/snk/chat")
+    if g and path not in open_paths and not is_pl:
         return {"game": None, "error": "not_player"}
+    if g and not is_pl and path in ("/api/snk/state", "/api/snk/chat"):
+        touch_watch(f"s{g['id']}", uid)       # تماشاچی
     if not g:
         g = _active_of(uid)
+    if path == "/api/snk/gpacks":
+        s = get_session()
+        try:
+            rows = s.query(GlobalPack).order_by(GlobalPack.id.asc()).all()
+            return {"packs": [{"id": r.id, "name": r.name, "title": r.title, "stickers": json.loads(r.stickers)}
+                              for r in rows], "staff": is_staff(uid)}
+        finally:
+            s.close()
+    if path == "/api/snk/gpack_add":
+        if not is_staff(uid):
+            return {"error": "forbidden"}
+        pack_name = _pack_name(str(data.get("url") or "").strip())
+        if not pack_name:
+            return {"error": "bad_pack_link"}
+        title, stickers, err = await _fetch_pack(pack_name)
+        if err:
+            return {"error": err}
+        try:
+            s = get_session()
+            try:
+                old = s.query(GlobalPack).filter(GlobalPack.name == pack_name).first()
+                if old:
+                    old.title, old.stickers, old.added_by = title[:128], json.dumps(stickers, ensure_ascii=False), uid
+                else:
+                    s.add(GlobalPack(added_by=uid, name=pack_name, title=title[:128],
+                                     stickers=json.dumps(stickers, ensure_ascii=False)))
+                s.commit()
+            finally:
+                s.close()
+        except Exception:
+            logger.exception("snakes: saving global pack failed")
+            return {"error": "db_error"}
+        return {"ok": True, "title": title, "count": len(stickers)}
+    if path == "/api/snk/gpack_del":
+        if not is_staff(uid):
+            return {"error": "forbidden"}
+        try:
+            pid = int(data.get("id"))
+        except (TypeError, ValueError):
+            return {"error": "bad_request"}
+        s = get_session()
+        try:
+            r = s.get(GlobalPack, pid)
+            if r:
+                s.delete(r)
+                s.commit()
+        except Exception:
+            s.rollback()
+            logger.exception("snakes: deleting global pack failed")
+            return {"error": "db_error"}
+        finally:
+            s.close()
+        return {"ok": True}
     if path == "/api/snk/packs":
         s = get_session()
         try:
@@ -552,41 +731,17 @@ async def api(path, uid, data):
             return {"error": "db_error"}
         return {"ok": True, "title": st.title, "count": len(stickers)}
     if path == "/api/snk/chat":
-        if not g or not any(p["id"] == uid for p in g["players"]):
-            return {"error": "not_player"}
-        kind = str(data.get("kind") or "text")
-        msg = {"uid": uid, "name": next((p["name"] for p in g["players"] if p["id"] == uid), "بازیکن"),
-               "at": _now()}
-        if kind == "text":
-            value = " ".join(str(data.get("text") or "").split())[:300]
-            if not value:
-                return {"error": "empty_message"}
-            msg.update({"kind": "text", "text": value})
-        elif kind == "sticker":
-            try:
-                pack_id, ix = int(data.get("pack_id")), int(data.get("index"))
-            except (TypeError, ValueError):
-                return {"error": "bad_sticker"}
-            s = get_session()
-            try:
-                pack = s.query(StickerPack).filter(StickerPack.id == pack_id,
-                                                    StickerPack.owner_id == uid).first()
-                if not pack:
-                    return {"error": "pack_not_found"}
-                stickers = json.loads(pack.stickers)
-                if not 0 <= ix < len(stickers):
-                    return {"error": "bad_sticker"}
-                chosen = stickers[ix]
-                msg.update({"kind": "sticker", "file_id": chosen["file_id"],
-                            "emoji": chosen.get("emoji", "🙂")})
-            finally:
-                s.close()
-        else:
-            return {"error": "bad_request"}
+        if not g:
+            return {"error": "no_game"}
+        me_p = next((x for x in g["players"] if x["id"] == uid), None)
+        name = me_p["name"] if me_p else str(data.get("_name") or "کاربر")
+        msg, err = build_chat_msg(uid, name, data, spec=not me_p)
+        if err:
+            return {"error": err, "game": state_for(g, uid)}
         g.setdefault("messages", []).append(msg)
         del g["messages"][:-50]
         _save(g)
-        if kind == "sticker":
+        if msg.get("kind") == "sticker" and me_p:       # استیکر تماشاچی توی گروه نمی‌ره
             try:
                 await _app[0].bot.send_sticker(chat_id=g["chat"], sticker=msg["file_id"])
             except Exception:
@@ -665,6 +820,7 @@ async def tick(context):
                         todo.append(g)
                 elif g["status"] in ("done", "cancelled", "refunded") and now - g["updated"] > KEEP_DONE:
                     GAMES.pop(g["id"], None)
+                    WATCH.pop(f"s{g['id']}", None)
         for g in todo:
             await _announce(bot, g)
         if now - _last_scan[0] >= 60:

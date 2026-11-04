@@ -123,6 +123,11 @@ def _cm():
     return commerce
 
 
+def _snk():
+    import snakes
+    return snakes
+
+
 def _esc(s):
     return html.escape(str(s or ""), quote=False)
 
@@ -377,6 +382,13 @@ def _board(g):
     return "\n".join(f"{medals[i]} {_esc(p['name'])} — <b>{p['score']}</b>" for i, p in enumerate(rk))
 
 
+def _watch_btn(g):
+    lk = _link()
+    if lk:
+        return _btn("👀 تماشا", url=f"{lk}?startapp=drw_{g['id']}")
+    return _btn("👀 تماشا", callback_data=f"drw:watch:{g['id']}")
+
+
 def _text(g):
     names = "\n".join(f"{i + 1}. {_esc(p['name'])}" for i, p in enumerate(g["players"]))
     pot = g["bet"] * len(g["players"])
@@ -391,7 +403,7 @@ def _text(g):
             return head
         dr = _drawer(g)
         return (head + f"\n🖌 دور <b>{g['rnd']}</b> از {ROUNDS} — نقاش: <b>{_esc(dr['name'])}</b>\n\n"
-                f"🏅 امتیازها:\n{_board(g)}\n\n🎮 بازی شروع شده؛ از «ورود به مینی‌اپ» بازی کن.")
+                f"🏅 امتیازها:\n{_board(g)}\n\n🎮 بازی شروع شده؛ از «ورود به مینی‌اپ» بازی کن یا با «👀 تماشا» ببین.")
     if g["status"] == "done":
         if g.get("all_zero"):
             return (head + f"\n🏁 <b>بازی تموم شد</b>\n\n🏅 امتیازها:\n{_board(g)}\n\n"
@@ -420,7 +432,7 @@ def _kb(g):
                                      [_btn("▶️ شروع بازی", callback_data=f"drw:go:{gid}"),
                                       _btn("لغو", callback_data=f"drw:x:{gid}", style="danger")]])
     if g["status"] == "playing":
-        return InlineKeyboardMarkup([[_app_btn(g)]])
+        return InlineKeyboardMarkup([[_app_btn(g), _watch_btn(g)]])
     return None
 
 
@@ -536,6 +548,15 @@ async def cb(update, context):
         g = GAMES.get(gid)
         if not g:
             note, alert = "این بازی دیگه فعال نیست.", True
+        elif act == "watch":
+            if g["status"] not in ("lobby", "playing"):
+                note, alert = "این بازی تموم شده.", True
+            else:
+                try:
+                    await context.bot.send_message(uid, "👀 نقاشی — برای تماشا دکمهٔ زیر رو بزن 👇", reply_markup=_open_kb(gid))
+                    note = "لینک تماشا به پیوی ربات فرستاده شد 👌"
+                except Exception:
+                    note, alert = "اول ربات رو توی پیوی استارت کن (/start) و دوباره بزن.", True
         elif act == "app":
             if not any(p["id"] == uid for p in g["players"]):
                 note, alert = ("اول «پیوستن» رو بزن." if g["status"] == "lobby" else "این بازی شروع شده و تو توش نیستی."), True
@@ -610,6 +631,7 @@ def state_for(g, uid, data=None):
     start = 0 if reset else max(0, min(since, total))
     gs = g.get("guesses") or {}
     mine = gs.get(str(uid)) if playing else None
+    spec = not any(p["id"] == uid for p in g["players"])
     out = {
         "id": g["id"], "status": g["status"], "phase": g.get("phase"), "bet": g["bet"],
         "pot": g["bet"] * len(g["players"]), "creator": g["creator"], "me": uid,
@@ -620,11 +642,12 @@ def state_for(g, uid, data=None):
                      "ans": bool(playing and g.get("phase") == "draw" and str(p["id"]) in gs)}
                     for i, p in enumerate(g["players"])],
         "word": g.get("word") if playing and (uid == drawer or g.get("phase") == "result") else None,
-        "options": (g.get("options") or []) if playing and uid != drawer else [],
+        "options": (g.get("options") or []) if playing and uid != drawer and not spec else [],
         "my": ({"opt": mine["opt"], "ok": mine["ok"], "pts": mine["pts"]} if mine else None),
         "last_round": g.get("last_round"),
         "winners": g.get("winners"), "payout": g.get("payout"), "each": g.get("each"), "tax": g.get("tax"),
         "net": g.get("net"), "all_zero": bool(g.get("all_zero")), "forfeit": bool(g.get("left_forfeit")),
+        "spec": spec, "watchers": _snk().watchers(f"d{g['id']}"), "chat": (g.get("messages") or [])[-30:],
         "ops": ops[start:start + OPS_CHUNK], "from": start, "total": total, "reset": reset,
     }
     return out
@@ -668,17 +691,32 @@ def _clean_ops(raw):
 async def api(path, uid, data):
     gid = data.get("gid")
     g = GAMES.get(gid) if isinstance(gid, int) and not isinstance(gid, bool) else None
-    if g and not any(p["id"] == uid for p in g["players"]):
+    is_pl = bool(g and any(p["id"] == uid for p in g["players"]))
+    if g and not is_pl and path not in ("/api/drw/state", "/api/drw/chat"):
         return {"game": None, "error": "not_player"}
+    if g and not is_pl:
+        _snk().touch_watch(f"d{g['id']}", uid)       # تماشاچی
     if not g:
         g = _active_of(uid)
     if not g:
         return {"game": None, "error": "no_game"}
     err = None
+    fwd = None
     async with _LOCK:
         _step(g)
         me_p = _pl(g, uid)
-        if path == "/api/drw/leave":
+        if path == "/api/drw/chat":
+            name = me_p["name"] if me_p else str(data.get("_name") or "کاربر")
+            msg, e = _snk().build_chat_msg(uid, name, data, spec=not me_p)
+            if e:
+                err = e
+            else:
+                g.setdefault("messages", []).append(msg)
+                del g["messages"][:-50]
+                _save(g)
+                if msg.get("kind") == "sticker" and me_p:
+                    fwd = (g["chat"], msg["file_id"])
+        elif path == "/api/drw/leave":
             if g["status"] != "playing" or not me_p or me_p.get("out"):
                 err = "not_draw"
             else:
@@ -741,6 +779,11 @@ async def api(path, uid, data):
         elif path != "/api/drw/state":
             return {"game": None, "error": "not_found"}
         res = {"game": state_for(g, uid, data)}
+    if fwd:
+        try:
+            await _app[0].bot.send_sticker(chat_id=fwd[0], sticker=fwd[1])
+        except Exception:
+            logger.info("draw: group sticker delivery failed", exc_info=True)
     if err:
         res["error"] = err
     return res
@@ -784,6 +827,7 @@ async def tick(context):
                     todo.append(g)
                 elif g["status"] in ("done", "cancelled", "refunded") and now - g["updated"] > KEEP_DONE:
                     GAMES.pop(g["id"], None)
+                    _snk().WATCH.pop(f"d{g['id']}", None)
         for g in todo:
             await _announce(bot, g)
         if now - _last_scan[0] >= 60:

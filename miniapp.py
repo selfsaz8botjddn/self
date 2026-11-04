@@ -276,8 +276,8 @@ async def _route(method, path, headers, body):
     if path in ("/api/me", "/api/toggle", "/api/snk/state", "/api/snk/roll",
                 "/api/snk/packs", "/api/snk/pack_add", "/api/snk/chat",
                 "/api/self/state", "/api/self/act", "/api/self/dialogs",
-                "/api/drw/state", "/api/drw/ops", "/api/drw/guess", "/api/drw/report", "/api/drw/leave",
-                "/api/snk/leave"):
+                "/api/drw/state", "/api/drw/ops", "/api/drw/guess", "/api/drw/report", "/api/drw/leave", "/api/drw/chat",
+                "/api/snk/leave", "/api/snk/gpacks", "/api/snk/gpack_add", "/api/snk/gpack_del"):
         if method != "POST":
             return _resp(405, {"error": "method"})
         auth = headers.get("authorization", "")
@@ -312,6 +312,7 @@ async def _route(method, path, headers, body):
             except Exception:
                 return _resp(400, {"error": "bad_request"})
             import drawgame
+            data["_name"] = str(user.get("first_name") or "کاربر")[:20]
             try:
                 return _resp(200, await drawgame.api(path, uid, data))
             except Exception:
@@ -327,6 +328,7 @@ async def _route(method, path, headers, body):
             except Exception:
                 return _resp(400, {"error": "bad_request"})
             import snakes
+            data["_name"] = str(user.get("first_name") or "کاربر")[:20]
             try:
                 return _resp(200, await snakes.api(path, uid, data))
             except Exception:
@@ -713,6 +715,11 @@ h1{display:flex;align-items:center;gap:8px;font-size:19px}h1 .ico{width:24px;hei
 .dopts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-flow:row;gap:5px;margin-top:12px;direction:rtl}
 .dop{margin:0;padding:6px 1px;min-height:50px;width:100%;font-size:11px;line-height:1.3;font-weight:700;border-radius:10px;background:var(--card2);box-shadow:none;border:1.5px solid rgba(124,92,255,.5);display:flex;align-items:center;justify-content:center;text-align:center;overflow-wrap:anywhere;word-break:break-word;white-space:normal}
 .dpl.out{opacity:.4}
+.dchat{margin-top:12px;background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:8px}
+.dcm{max-height:112px;overflow:auto;font-size:12.5px;line-height:1.7}
+.dqe{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:6px 0}
+.dqe a{font-size:20px;cursor:pointer;padding:2px 6px;border-radius:9px;background:rgba(255,255,255,.07)}
+.dci{display:flex;gap:6px}.dci input{flex:1;min-width:0}
 .xbtn{border-color:rgba(255,77,109,.7)!important;color:#ff8a9d!important}
 .dop:disabled{opacity:.55}
 .dop.ok{background:linear-gradient(135deg,#00c853,#27d98a);border-color:transparent;opacity:1}
@@ -1089,7 +1096,7 @@ function renderGames(s){
   <h3>🎨 استیکرهای تلگرام</h3><p>لینک پک استیکر را از تلگرام کپی کن و اینجا وارد کن تا به مجموعه‌ات اضافه شود.</p>
   <input id="sturl" dir="ltr" placeholder="https://t.me/addstickers/PackName" style="width:100%;margin:8px 0">
   <button id="stadd">➕ افزودن پک استیکر</button><div id="stpacks" class="hint">در حال دریافت پک‌ها…</div>
- </div></div>`;
+ </div></div><div id="gpcard"></div>`;
  const show=(id)=>{document.querySelectorAll(".game-detail").forEach(x=>x.classList.remove("on"));$(id).classList.add("on")};
  $("pickSnake").onclick=()=>show("snakeDetail");
  $("pickDraw").onclick=()=>show("drawDetail");
@@ -1097,6 +1104,7 @@ function renderGames(s){
  const dc=$("dcont");if(dc)dc.onclick=()=>openDraw(s.draw.id);
  $("gprac").onclick=startPractice;
  loadStickerPacks();
+ loadGlobalPacks();
 }
 
 /* ---------- پک‌های استیکر ---------- */
@@ -1116,24 +1124,52 @@ async function loadStickerPacks(){
   }catch(e){toast(e.message)}finally{b.disabled=false;b.textContent="➕ افزودن پک استیکر"}
  };
 }
-async function chooseSticker(){
+const GPERR={forbidden:"فقط پشتیبانی می‌تونه پک همگانی اضافه کنه.",bad_pack_link:"لینک پک معتبر نیست.",pack_not_found:"پک پیدا نشد؛ لینک رو دوباره کپی کن.",empty_pack:"این پک استیکری ندارد.",tg_timeout:"تلگرام دیر جواب داد؛ دوباره امتحان کن.",tg_error:"تلگرام جواب نداد؛ کمی بعد دوباره امتحان کن.",db_error:"ذخیره ناموفق بود؛ دوباره امتحان کن.",internal:"مشکل موقتی سرور؛ دوباره امتحان کن."};
+async function loadGlobalPacks(){
+ const el=$("gpcard");if(!el)return;
  try{
-  const r=await api("/api/snk/packs");STPACKS=r.packs||[];
-  if(!STPACKS.length){toast("اول از بخش بازی‌ها یک پک استیکر اضافه کن.");return}
-  sheetOpen(`<h3>🎨 انتخاب استیکر</h3>${STPACKS.map(p=>`<div class="opt" data-pack="${p.id}">🎨 ${esc(p.title)} · ${fa(p.stickers.length)} استیکر</div>`).join("")}<div id="stchoose"></div>`);
+  const r=await api("/api/snk/gpacks"),ps=r.packs||[],st=!!r.staff;
+  if(!ps.length&&!st){el.innerHTML="";return}
+  el.innerHTML=`<div class="gc" style="margin-top:14px"><div class="gb"><h3>🌐 استیکرهای همگانی</h3><p>این پک‌ها را پشتیبانی اضافه کرده و همهٔ کاربرها توی چت مار و پله و نقاشی می‌تونن استفاده کنن.</p>${ps.length?ps.map(p=>`<div class="row"><span>🌐 ${esc(p.title)} <small>(${fa(p.stickers.length)} استیکر)</small></span>${st?`<button class="alt sm" data-gdel="${p.id}" style="width:auto">🗑 حذف</button>`:`<span class="chip g">فعال</span>`}</div>`).join(""):'<div class="hint">هنوز پکی اضافه نشده.</div>'}${st?`<input id="gpurl" dir="ltr" placeholder="https://t.me/addstickers/PackName" style="width:100%;margin:8px 0"><button id="gpadd">➕ افزودن پک همگانی</button>`:""}</div></div>`;
+  const add=$("gpadd");if(add)add.onclick=async()=>{
+   const v=$("gpurl").value.trim();if(!v){toast("لینک پک را وارد کن");return}
+   add.disabled=true;add.textContent="در حال افزودن…";
+   try{const x=await api("/api/snk/gpack_add",{url:v});
+    if(x.ok){toast("✅ پک همگانی اضافه شد: "+x.title);await loadGlobalPacks()}
+    else toast(GPERR[x.error]||"افزودن پک ناموفق بود.")}
+   catch(e){toast(e.message)}finally{add.disabled=false;add.textContent="➕ افزودن پک همگانی"}};
+  el.querySelectorAll("[data-gdel]").forEach(b=>b.onclick=async()=>{
+   try{const x=await api("/api/snk/gpack_del",{id:Number(b.dataset.gdel)});
+    if(x.ok){toast("پک حذف شد");await loadGlobalPacks()}else toast(GPERR[x.error]||"حذف ناموفق بود.")}
+   catch(e){toast(e.message)}})
+ }catch(e){el.innerHTML=""}
+}
+const QEMO=["👏","😂","🔥","😮","😭","👍","🎉","😡"];
+const CERR={slow:"یه کم آروم‌تر ✋",empty_message:"پیام خالیه.",pack_not_found:"این پک دیگه وجود نداره.",bad_sticker:"استیکر نامعتبره.",no_game:"این بازی فعال نیست.",rate:"کمی صبر کن."};
+async function pickSticker(send){
+ try{
+  const [a,b]=await Promise.all([api("/api/snk/gpacks"),api("/api/snk/packs")]);
+  const all=(a.packs||[]).map(p=>Object.assign({},p,{g:1})).concat((b.packs||[]).map(p=>Object.assign({},p,{g:0})));
+  STPACKS=b.packs||[];
+  if(!all.length){toast("هنوز استیکری اضافه نشده؛ از پشتیبانی بخواه پک همگانی اضافه کنه.");return}
+  sheetOpen(`<h3>🎨 انتخاب استیکر</h3>${all.map((p,k)=>`<div class="opt" data-pack="${k}">${p.g?"🌐":"🎨"} ${esc(p.title)} · ${fa(p.stickers.length)} استیکر</div>`).join("")}<div id="stchoose"></div>`);
   $("sh").querySelectorAll("[data-pack]").forEach(el=>el.onclick=()=>{
-   const p=STPACKS.find(x=>x.id===Number(el.dataset.pack));if(!p)return;
-   $("stchoose").innerHTML=`<div class="fg">${p.stickers.map((x,i)=>`<div class="fc" data-st="${i}" data-pk="${p.id}"><div class="sm1" style="font-size:28px">${esc(x.emoji||"🙂")}</div><small>استیکر ${fa(i+1)}</small></div>`).join("")}</div>`;
-   $("stchoose").querySelectorAll("[data-st]").forEach(x=>x.onclick=async()=>{
-    sheetClose();try{const r=await api("/api/snk/chat",{gid:GID,kind:"sticker",pack_id:Number(x.dataset.pk),index:Number(x.dataset.st)});if(r.game)applyG(r.game);if(r.error)toast("ارسال استیکر انجام نشد.")}catch(e){toast(e.message)}
-   });
+   const p=all[Number(el.dataset.pack)];if(!p)return;
+   $("stchoose").innerHTML=`<div class="fg">${p.stickers.map((x,i)=>`<div class="fc" data-st="${i}"><div class="sm1" style="font-size:28px">${esc(x.emoji||"🙂")}</div><small>استیکر ${fa(i+1)}</small></div>`).join("")}</div>`;
+   $("stchoose").querySelectorAll("[data-st]").forEach(x=>x.onclick=()=>{sheetClose();send({kind:"sticker",pack_id:p.id,index:Number(x.dataset.st),g:p.g})});
   });
  }catch(e){toast(e.message)}
 }
+async function snkChat(payload){
+ try{const r=await api("/api/snk/chat",Object.assign({gid:GID},payload));
+  if(r.error){toast(CERR[r.error]||"ارسال پیام ناموفق بود");if(r.game)applyG(r.game);return false}
+  if(r.game)applyG(r.game);return true}
+ catch(e){toast(e.message);return false}
+}
+function chooseSticker(){return pickSticker(snkChat)}
 async function sendGameChat(){
  const el=$("gchattext");if(!el)return;const text=el.value.trim();if(!text)return;
- try{const r=await api("/api/snk/chat",{gid:GID,kind:"text",text});if(r.game){el.value="";applyG(r.game)}else toast("ارسال پیام ناموفق بود")}
- catch(e){toast(e.message)}
+ if(await snkChat({kind:"text",text}))el.value=""
 }
 
 /* ---------- بازی مار و پله ---------- */
@@ -1249,7 +1285,7 @@ async function poll(){try{const r=await api("/api/snk/state",{gid:GID});
 function nameOf(g,id){const p=g.players.find(x=>x.id===id);return p?p.name:"—"}
 function applyG(g){
  GS=g;LEFT=g.left;LAT=Date.now();GID=g.id;
- const sig=JSON.stringify([g.status,g.turn,g.seq,g.players.map(p=>[p.pos,p.out]),g.winner,g.chat||[]]);
+ const sig=JSON.stringify([g.status,g.turn,g.seq,g.players.map(p=>[p.pos,p.out]),g.winner,g.chat||[],g.spec,g.watchers]);
  if(sig!==SIG){SIG=sig;renderTop(g)}
  g.players.forEach(p=>{if(!TKE[p.id])setTok(p,FIRST?p.pos:0,false)});
  if(g.last&&g.last.seq!==LSEQ){
@@ -1260,7 +1296,7 @@ function applyG(g){
  Q=Q.then(()=>{if(GS!==g)return;g.players.forEach(p=>{if(DISP[p.id]!==p.pos||TKE[p.id].style.opacity!==(p.out?".35":"1"))setTok(p,p.pos,false)})});
  FIRST=false;
  if(["done","cancelled","refunded"].includes(g.status)){
-  if(g.status==="done"&&!g._shown){g._shown=1;Q=Q.then(()=>{SFX[g.winner===g.me?"win":"lose"]();toast(g.winner===g.me?"🏆 برنده شدی!":"🏁 "+nameOf(g,g.winner)+" برنده شد",3500);haptic(g.winner===g.me?"success":"warning")})}
+  if(g.status==="done"&&!g._shown){g._shown=1;Q=Q.then(()=>{if(!g.spec)SFX[g.winner===g.me?"win":"lose"]();toast(g.winner===g.me?"🏆 برنده شدی!":"🏁 "+nameOf(g,g.winner)+" برنده شد",3500);if(!g.spec)haptic(g.winner===g.me?"success":"warning")})}
   if(!PRAC){if(!STOPAT)STOPAT=Date.now()+8000;else if(Date.now()>STOPAT){clearInterval(PT);PT=null}}}}
 function animMove(g,L){
  const p=g.players.find(x=>x.id===L.pid);if(!p)return;
@@ -1289,22 +1325,24 @@ function renderTop(g){
  else top="❌ بازی لغو شد؛ شرط‌ها برگشت";
  const mep=g.players.find(p=>p.id===me);
  if(g.status==="playing"&&mep&&mep.out)top="🚪 از بازی خارج شدی؛ شرطت سوخت";
+ if(g.spec)top="👀 <b>تماشاچی</b> · "+top;
  const exb=$("gexit");if(exb)exb.style.display=(g.status==="playing"&&!g.practice&&mep&&!mep.out)?"":"none";
  const pl=g.players.map(p=>`<div class="pl ${p.id===g.turn&&g.status==="playing"?"cur":""} ${p.out?"out":""}"><u style="background:${COLORS[p.idx%4]}"></u><span>${esc(p.name)}${p.id===me&&!g.practice?" (تو)":""}</span><b>${p.pos?fa(p.pos):"شروع"}</b></div>`).join("");
  const L=g.last,ev=L?(L.ev==="ladder"?" 🪜":L.ev==="snake"?" 🐍":""):"";
  const lt=L?`${nm(L.pid)}: ${fa(L.r)} ← ${fa(L.from)} به ${fa(L.to)}${ev}${L.auto?" (خودکار)":""}`:"";
  const money=g.practice?`<div class="row"><span>🤖 حالت تمرین</span><span>بدون الماس</span></div>`:`<div class="row"><span>💎 شرط هر نفر</span><span>${num(g.bet)}</span></div><div class="row"><span>🎁 جایزهٔ کل</span><span>${num(g.pot)}</span></div>`;
  const chat=(g.chat||[]).map(m=>`<div class="row" style="align-items:flex-start"><span><b>${esc(m.name)}:</b> ${m.kind==="sticker"?"🎨 استیکر "+esc(m.emoji||"🙂"):esc(m.text||"")}</span></div>`).join("");
- const chatbox=g.practice?"":`<div class="gc" style="margin:12px 0;padding:12px"><h3>💬 چت بازی</h3><div style="max-height:180px;overflow:auto">${chat||'<div class="hint">هنوز پیامی نیست.</div>'}</div><div style="display:flex;gap:6px;margin-top:8px"><input id="gchattext" placeholder="پیام بنویس…" maxlength="300"><button id="gchatsend" style="width:auto">ارسال</button><button id="gchatst" class="alt" style="width:auto">🎨</button></div></div>`;
+ const chatbox=g.practice?"":`<div class="gc" style="margin:12px 0;padding:12px"><h3>💬 چت بازی${g.watchers?` <small style="color:var(--hint)">· 👀 ${fa(g.watchers)} تماشاچی</small>`:""}</h3><div style="max-height:180px;overflow:auto">${chat||'<div class="hint">هنوز پیامی نیست.</div>'}</div><div class="dqe" id="gqe">${QEMO.map(e=>`<a data-q="${e}">${e}</a>`).join("")}</div><div style="display:flex;gap:6px;margin-top:8px"><input id="gchattext" placeholder="پیام بنویس…" maxlength="300"><button id="gchatsend" style="width:auto">ارسال</button><button id="gchatst" class="alt" style="width:auto">🎨</button></div></div>`;
  $("gtop").innerHTML=`<div class="top">${top}</div>${money}${pl}${chatbox}`;
  const csend=$("gchatsend"),cinput=$("gchattext"),cst=$("gchatst");
  if(csend)csend.onclick=sendGameChat;
  if(cinput)cinput.onkeydown=e=>{if(e.key==="Enter")sendGameChat()};
  if(cst)cst.onclick=chooseSticker;
+ document.querySelectorAll("#gqe [data-q]").forEach(a=>a.onclick=()=>snkChat({kind:"text",text:a.dataset.q}));
  $("glog").innerHTML=g.log.map(x=>esc(x)).join("<br>");
  /* دکمهٔ تاس و خود تاس پایین صفحه (ثابت) */
  const dk=$("gdock"),rb=$("rb");
- if(dk){dk.style.display=g.status==="playing"?"block":"none";
+ if(dk){dk.style.display=(g.status==="playing"&&!g.spec)?"block":"none";
   $("dkt").innerHTML=lt||"اول تو تاس بنداز!";
   rb.disabled=!mine||RB;rb.classList.toggle("go",mine);
   rb.textContent=mine?"🎲 تاس بنداز":"⏳ نوبت "+nameOf(g,g.turn)}}
@@ -1339,7 +1377,7 @@ function pRoll(){
 const DCOL=["#111111","#ff1744","#ff6d00","#ffd600","#76ff03","#00c853","#00e5ff","#2979ff","#651fff","#d500f9","#ff4081","#8d5524","#9e9e9e","#fffef9"],DW=[6,14,34],DPAPER="#fffef9";
 const DE={not_player:"تو توی این بازی نیستی.",no_game:"این بازی فعال نیست.",not_draw:"الان زمان حدس زدن نیست.",drawer:"نقاش نمی‌تونه حدس بزنه 😅",already:"قبلاً جواب دادی.",bad_option:"گزینه نامعتبره.",not_drawer:"الان نوبت نقاشی تو نیست.",wait_drawing:"صبر کن نقاش شروع کنه ✏️",stale:"دور عوض شد.",left:"تو از بازی خارج شدی.",rate:"کمی صبر کن."};
 let DR=null;
-function drNew(gid){return{gid:gid,rnd:null,n:0,fresh:true,GS:null,sig:"",dsig:"",osig:"",LEFT:0,LAT:0,col:0,wid:1,q:[],cur:null,drawing:false,inflight:false,polling:false,pt:null,ft:null,busyG:false,lastSec:-1,myk:"",prevRnd:-1,done:false,stopAt:0,confetti:false,tmv:"",sc:{},cx:null}}
+function drNew(gid){return{gid:gid,rnd:null,n:0,fresh:true,GS:null,sig:"",dsig:"",osig:"",csig:"",LEFT:0,LAT:0,col:0,wid:1,q:[],cur:null,drawing:false,inflight:false,polling:false,pt:null,ft:null,busyG:false,lastSec:-1,myk:"",prevRnd:-1,done:false,stopAt:0,confetti:false,tmv:"",sc:{},cx:null}}
 function drStop(){const D=DR;if(!D)return;clearInterval(D.pt);clearInterval(D.ft);DR=null;try{tg&&tg.enableVerticalSwipes&&tg.enableVerticalSwipes()}catch(e){}}
 function openDraw(gid){
  stopGame();
@@ -1352,11 +1390,16 @@ function drShell(){
  $("g").innerHTML=`<div class="gbar"><button class="alt sm" id="dback">‹ بازگشت</button><button class="alt sm xbtn" id="dexit" style="display:none">🚪 خروج</button><button class="alt sm" id="dsnd">${SFX.on?"🔊 صدا":"🔇 بی‌صدا"}</button></div>
  <div id="dtop"><div class="msg">در حال بارگذاری…</div></div>
  <div class="dcw" id="dcw"><canvas id="dcv" width="1000" height="1000"></canvas><div class="dov" id="dov"></div></div>
- <div id="ddock"></div>`;
+ <div id="ddock"></div>
+ <div class="dchat" id="dchat"><div class="dcm" id="dcm"></div><div class="dqe" id="dqe">${QEMO.map(e=>`<a data-q="${e}">${e}</a>`).join("")}</div><div class="dci"><input id="dct" placeholder="پیام بنویس…" maxlength="300"><button id="dcs" style="width:auto">ارسال</button><button id="dcst" class="alt" style="width:auto">🎨</button></div></div>`;
  $("dback").onclick=()=>{drStop();showTab(VIEW==="dash"?"games":VIEW);reloadDash()};
  $("dexit").onclick=()=>askExit(async()=>{const D=DR;if(!D)return;try{const r=await api("/api/drw/leave",{gid:D.gid,rnd:D.rnd,since:D.n});if(DR===D&&r.game)drApply(r.game);if(r.error)toast(DE[r.error]||"خطا")}catch(e){toast(e.message)}});
  $("dsnd").onclick=()=>{SFX.set(!SFX.on);$("dsnd").textContent=SFX.on?"🔊 صدا":"🔇 بی‌صدا";if(SFX.on)SFX.tick()};
  const cv=$("dcv");DR.cx=cv.getContext("2d");drClear();
+ $("dcs").onclick=async()=>{const el=$("dct"),t=el.value.trim();if(t&&await drChat({kind:"text",text:t}))el.value=""};
+ $("dct").onkeydown=e=>{if(e.key==="Enter")$("dcs").click()};
+ $("dcst").onclick=()=>pickSticker(drChat);
+ document.querySelectorAll("#dqe [data-q]").forEach(a=>a.onclick=()=>drChat({kind:"text",text:a.dataset.q}));
  cv.addEventListener("pointerdown",drDown);cv.addEventListener("pointermove",drMove);
  cv.addEventListener("pointerup",drUp);cv.addEventListener("pointercancel",drUp);
  $("ddock").onclick=e=>{
@@ -1366,6 +1409,19 @@ function drShell(){
   if(e.target.closest("[data-e]")){D.col=13;drSel();haptic("light");return}
   if(e.target.closest("[data-clr]")){drCut();D.q.push({clr:1});drClear();haptic("warning");return}
   const o=e.target.closest("[data-o]");if(o&&!o.disabled)drGuess(+o.dataset.o)}}
+async function drChat(payload){
+ const D=DR;if(!D)return false;
+ try{const r=await api("/api/drw/chat",Object.assign({gid:D.gid,rnd:D.rnd,since:D.n},payload));
+  if(DR!==D)return false;
+  if(r.game)drApply(r.game);
+  if(r.error){toast(CERR[r.error]||"ارسال پیام ناموفق بود");return false}
+  return true}
+ catch(e){toast(e.message);return false}
+}
+function drRenderChat(g){
+ const el=$("dcm");if(!el)return;
+ el.innerHTML=(g.chat||[]).slice(-12).map(m=>`<div><b>${esc(m.name)}:</b> ${m.kind==="sticker"?"🎨 "+esc(m.emoji||"🙂"):esc(m.text||"")}</div>`).join("")||'<div class="hint">هنوز پیامی نیست.</div>';
+ el.scrollTop=el.scrollHeight}
 function drClear(){const D=DR;if(!D||!D.cx)return;D.cx.fillStyle=DPAPER;D.cx.fillRect(0,0,1000,1000)}
 function drawOp(o){
  const D=DR;if(!D||!D.cx)return;const cx=D.cx;
@@ -1446,9 +1502,11 @@ function drApply(g){
   D.prevRnd=g.rnd}
  const k=g.my?(g.my.ok?"ok":"no"):"";
  if(k!==D.myk){if(k==="ok"){SFX.ladder();haptic("success")}else if(k==="no"){SFX.lose();haptic("error")}D.myk=k}
- if(g.status==="done"&&!D.done){D.done=true;const iw=(g.winners||[]).includes(g.me);if(!g.all_zero){SFX[iw?"win":"lose"]();haptic(iw?"success":"warning")}}
+ if(g.status==="done"&&!D.done){D.done=true;const iw=(g.winners||[]).includes(g.me);if(!g.all_zero&&!g.spec){SFX[iw?"win":"lose"]();haptic(iw?"success":"warning")}}
  /* بالا (امتیازها) */
- const sig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.players.map(p=>[p.score,p.ans,p.out])]);
+ const csig=JSON.stringify((g.chat||[]).map(m=>[m.at,m.uid,m.text||m.emoji||""]));
+ if(csig!==D.csig){D.csig=csig;drRenderChat(g)}
+ const sig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.players.map(p=>[p.score,p.ans,p.out]),g.spec,g.watchers]);
  if(sig!==D.sig){D.sig=sig;drRenderTop(g)}
  const dsig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.my&&g.my.opt,g.my&&g.my.ok,g.total>0,g.word,(g.players.find(p=>p.id===g.me)||{}).out]);
  if(dsig!==D.dsig){D.dsig=dsig;drRenderDock(g)}
@@ -1467,13 +1525,14 @@ function drRenderTop(g){
  if(exb)exb.style.display=(g.status==="playing"&&mep&&!mep.out)?"":"none";
  let head;
  if(g.status==="lobby")head=`<div class="dhd"><div class="dtt"><b>🎨 نقاشی و حدس</b><small>منتظر شروع بازی…</small></div>${ring}</div>`;
- else if(g.status==="playing")head=`<div class="dhd"><div class="dch">دور ${fa(g.rnd)} از ${fa(g.rounds)}</div><div class="dtt"><b>${g.phase==="result"?"📊 نتیجهٔ دور":isD?"✏️ نوبت نقاشی توئه!":esc(dn)+" داره نقاشی می‌کشه"}</b><small>${g.phase==="result"?"آماده شو برای دور بعد":isD?"کلمه رو فقط تو می‌بینی؛ ۳۰ ثانیه وقت داری":"بین گزینه‌ها حدس بزن چی می‌کشه!"}</small></div>${ring}</div>`;
+ else if(g.status==="playing")head=`<div class="dhd"><div class="dch">دور ${fa(g.rnd)} از ${fa(g.rounds)}</div><div class="dtt"><b>${g.phase==="result"?"📊 نتیجهٔ دور":isD?"✏️ نوبت نقاشی توئه!":esc(dn)+" داره نقاشی می‌کشه"}</b><small>${g.phase==="result"?"آماده شو برای دور بعد":isD?"کلمه رو فقط تو می‌بینی؛ ۳۰ ثانیه وقت داری":g.spec?"👀 تماشاچی هستی؛ کلمه مخفیه":"بین گزینه‌ها حدس بزن چی می‌کشه!"}</small></div>${ring}</div>`;
  else head=`<div class="dhd"><div class="dtt"><b>${g.status==="done"?"🏁 بازی تموم شد":"❌ بازی لغو شد"}</b><small>${g.status==="done"?"نتیجهٔ نهایی پایین‌تره":"شرط‌ها برگشت"}</small></div></div>`;
- $("dtop").innerHTML=head+`<div class="dpls">${pls}</div>`;DR.tmv=""}
+ $("dtop").innerHTML=head+`<div class="dpls">${pls}</div>`+(g.watchers?`<div class="hint" style="text-align:center;margin-top:6px">👀 ${fa(g.watchers)} تماشاچی</div>`:"");DR.tmv=""}
 function drRenderDock(g){
  const D=DR,dk=$("ddock");if(!dk||!D)return;
  if(g.status!=="playing"){dk.innerHTML=g.status==="done"||g.status==="cancelled"||g.status==="refunded"?`<button id="dback2" style="margin-top:12px">‹ بازگشت به بازی‌ها</button>`:"";
   const b=$("dback2");if(b)b.onclick=()=>$("dback").click();return}
+ if(g.spec){dk.innerHTML=`<div class="dnote">👀 داری تماشا می‌کنی؛ پایین می‌تونی چت کنی</div>`;return}
  const mp=g.players.find(p=>p.id===g.me);
  if(mp&&mp.out){dk.innerHTML=`<div class="dnote">🚪 از بازی خارج شدی؛ شرطت سوخت</div>`;return}
  if(g.drawer===g.me){
@@ -1507,6 +1566,7 @@ function drFinalHTML(g){
  const rk=g.players.slice().sort((a,b)=>b.score-a.score),iw=w.includes(me),medal=["🥇","🥈","🥉","4️⃣"];
  let head;
  if(g.all_zero)head=`<div class="dbig">🤝</div><b>مساوی!</b><small>هیچ‌کس امتیازی نگرفت؛ شرط‌ها برگشت</small>`;
+ else if(g.spec)head=`<div class="dbig">🏁</div><b>بازی تموم شد</b><small>برنده: ${esc(g.players.filter(p=>w.includes(p.id)).map(p=>p.name).join("، "))}</small>`;
  else{const n=Number(net[me]||0);head=`<div class="dbig">${iw?"🏆":"😵"}</div><b>${iw?"تو برنده شدی! 🎉":"باختی؛ دفعهٔ بعد جبران کن!"}</b><small>${iw?"+ "+fa(String(Math.max(0,n)))+" الماس خالص":"− "+fa(String(g.bet))+" الماس"}</small>`}
  const rows=rk.map((p,i)=>{const win=!g.all_zero&&w.includes(p.id);
   return `<div class="drow ${g.all_zero?"":win?"w":"l"}"><span class="rk">${medal[i]}</span><span class="nm2">${esc(p.name)}${p.id===me?" (تو)":""}</span><span class="st">${g.all_zero?"مساوی":win?"برنده 🏆":"بازنده"}</span><b>${fa(p.score)}</b></div>`}).join("");
