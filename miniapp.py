@@ -276,7 +276,7 @@ async def _route(method, path, headers, body):
     if path in ("/api/me", "/api/toggle", "/api/snk/state", "/api/snk/roll",
                 "/api/snk/packs", "/api/snk/pack_add", "/api/snk/chat",
                 "/api/self/state", "/api/self/act", "/api/self/dialogs",
-                "/api/drw/state", "/api/drw/ops", "/api/drw/guess"):
+                "/api/drw/state", "/api/drw/ops", "/api/drw/guess", "/api/drw/report"):
         if method != "POST":
             return _resp(405, {"error": "method"})
         auth = headers.get("authorization", "")
@@ -1053,26 +1053,43 @@ document.addEventListener("click",e=>{
 function renderGames(s){
  const dcont=s.draw?`<button id="dcont">▶️ ادامه نقاشی (${s.draw.status==="lobby"?"در حال جمع‌شدن بازیکن":"در جریان"})</button>`:"";
  const cont=s.game?`<button id="gcont">▶️ ادامه بازی (${s.game.status==="lobby"?"در حال جمع‌شدن بازیکن":"در جریان"})</button>`:"";
- $("gl").innerHTML=`<div class="gc"><div class="gimg"></div><div class="gb">
- <h3>🎲🐍 مار و پله</h3>
- <p>۲ تا ۴ نفر، شرط‌بندی با الماس. اول به خونهٔ ۱۰۰ برسه، برنده‌ست!</p>
- <ul class="rl"><li>تاس ۶ = یه نوبت دیگه</li><li>🐍 رسیدی به سر مار؟ می‌افتی پایین</li><li>🪜 رسیدی به پایین نردبون؟ می‌ری بالا</li><li>نوبت ۳۰ ثانیه‌ست؛ ۳ بار پشت‌سرهم نندازی حذف می‌شی</li><li>جایزه = کل شرط‌ها منهای ۵٪ مالیات</li></ul>
- ${cont}
- <button class="alt" id="gprac">🤖 تمرین با ربات (رایگان)</button>
- <div class="msg">برای بازی با شرط: توی گروه بنویس «مار و پله 10» و بقیه رو دعوت کن.</div>
- </div></div>
- <div class="gc" style="margin-top:14px"><div class="dimg"></div><div class="gb">
- <h3>🖌 نقاشی و حدس</h3>
- <p>۲ تا ۴ نفر، شرط‌بندی با الماس. ۴ دور؛ هر دور یکی نقاشی می‌کشه و بقیه حدس می‌زنن!</p>
- <ul class="rl"><li>هر دور ۳۰ ثانیه؛ نقاش یه کلمهٔ مخفی می‌گیره و فقط با نقاشی توضیحش می‌ده</li><li>بقیه بین ۴ گزینه حدس می‌زنن؛ هرچی سریع‌تر، امتیاز بیشتر ⚡</li><li>نقاش به‌ازای هر حدس درست امتیاز می‌گیره</li><li>آخر هر دور ۵ ثانیه نتیجه نشون داده می‌شه؛ آخر بازی برنده و بازنده‌ها مشخص می‌شن</li><li>جایزه = کل شرط‌ها منهای ۵٪ مالیات</li></ul>
- ${dcont}
- <div class="msg">برای ساخت میز: توی گروه بنویس «نقاشی 20» (عدد = شرط به الماس) و بقیه رو دعوت کن.</div>
- </div></div>
+ $("gl").innerHTML=`<style>
+ .game-picks{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:4px 0 14px}
+ .game-pick{min-height:104px;border:1px solid rgba(124,92,255,.42);border-radius:18px;background:linear-gradient(145deg,#202b55,#171d3b);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:12px 8px;box-shadow:0 8px 22px rgba(0,0,0,.2)}
+ .game-pick:active{transform:scale(.98)}.game-pick b{font-size:16px}.game-pick span{font-size:28px}
+ .game-detail{display:none}.game-detail.on{display:block}
+ </style>
+ <div class="game-picks">
+  <button class="game-pick" id="pickSnake"><span>🐍🪜</span><b>مار و پله</b><small>بازی گروهی و تمرینی</small></button>
+  <button class="game-pick" id="pickDraw"><span>🎨</span><b>نقاشی</b><small>نقاشی کن و حدس بزن</small></button>
+ </div>
+ <div id="snakeDetail" class="game-detail">
+  <div class="gc"><div class="gimg"></div><div class="gb">
+  <h3>🎲🐍 مار و پله</h3>
+  <p>۲ تا ۴ نفر، شرط‌بندی با الماس. اول به خونهٔ ۱۰۰ برسه، برنده‌ست!</p>
+  <ul class="rl"><li>تاس ۶ = یه نوبت دیگه</li><li>🐍 رسیدی به سر مار؟ می‌افتی پایین</li><li>🪜 رسیدی به پایین نردبون؟ می‌ری بالا</li><li>نوبت ۳۰ ثانیه‌ست؛ ۳ بار پشت‌سرهم نندازی حذف می‌شی</li><li>جایزه = کل شرط‌ها منهای ۵٪ مالیات</li></ul>
+  ${cont}
+  <button class="alt" id="gprac">🤖 تمرین با ربات (رایگان)</button>
+  <div class="msg">برای بازی با شرط: توی گروه بنویس «مار و پله 10» و بقیه رو دعوت کن.</div>
+  </div></div>
+ </div>
+ <div id="drawDetail" class="game-detail">
+  <div class="gc"><div class="dimg"></div><div class="gb">
+  <h3>🖌 نقاشی و حدس</h3>
+  <p>۲ تا ۴ نفر، شرط‌بندی با الماس. ۴ دور؛ هر دور یکی نقاشی می‌کشه و بقیه حدس می‌زنن!</p>
+  <ul class="rl"><li>هر دور ۳۰ ثانیه؛ نقاش یه کلمهٔ مخفی می‌گیره و فقط با نقاشی توضیحش می‌ده</li><li>بقیه بین ۱۸ گزینه حدس می‌زنن؛ هرچی سریع‌تر، امتیاز بیشتر ⚡</li><li>نقاش به‌ازای هر حدس درست امتیاز می‌گیره</li><li>آخر هر دور ۵ ثانیه نتیجه نشون داده می‌شه؛ آخر بازی برنده و بازنده‌ها مشخص می‌شن</li><li>جایزه = کل شرط‌ها منهای ۵٪ مالیات</li></ul>
+  ${dcont}
+  <div class="msg">برای ساخت میز: توی گروه بنویس «نقاشی 20» (عدد = شرط به الماس) و بقیه رو دعوت کن.</div>
+  </div></div>
+ </div>
  <div class="gc" style="margin-top:14px"><div class="gb">
- <h3>🎨 استیکرهای تلگرام</h3><p>لینک پک استیکر را از تلگرام کپی کن و اینجا وارد کن تا به مجموعه‌ات اضافه شود.</p>
- <input id="sturl" dir="ltr" placeholder="https://t.me/addstickers/PackName" style="width:100%;margin:8px 0">
- <button id="stadd">➕ افزودن پک استیکر</button><div id="stpacks" class="hint">در حال دریافت پک‌ها…</div>
+  <h3>🎨 استیکرهای تلگرام</h3><p>لینک پک استیکر را از تلگرام کپی کن و اینجا وارد کن تا به مجموعه‌ات اضافه شود.</p>
+  <input id="sturl" dir="ltr" placeholder="https://t.me/addstickers/PackName" style="width:100%;margin:8px 0">
+  <button id="stadd">➕ افزودن پک استیکر</button><div id="stpacks" class="hint">در حال دریافت پک‌ها…</div>
  </div></div>`;
+ const show=(id)=>{document.querySelectorAll(".game-detail").forEach(x=>x.classList.remove("on"));$(id).classList.add("on")};
+ $("pickSnake").onclick=()=>show("snakeDetail");
+ $("pickDraw").onclick=()=>show("drawDetail");
  const c=$("gcont");if(c)c.onclick=()=>openGame(s.game.id,false);
  const dc=$("dcont");if(dc)dc.onclick=()=>openDraw(s.draw.id);
  $("gprac").onclick=startPractice;
@@ -1459,7 +1476,11 @@ function drRenderDock(g){
  if(g.phase==="result")note="دور تموم شد؛ نتیجه بالاست 👆";
  else if(my)note=my.ok?`✅ درست بود! <b>+${fa(my.pts)}</b> امتیاز — منتظر بقیه…`:"❌ غلط بود؛ منتظر پایان دور…";
  else note=g.total?"کدوم گزینه درسته؟ هرچی زودتر، امتیاز بیشتر ⚡":"⏳ منتظر شروع نقاشی…";
- dk.innerHTML=`<div class="dopts">${opts}</div><div class="dnote">${note}</div>`}
+ dk.innerHTML=`<div class="dopts">${opts}</div><button class="alt" id="dreport" style="width:100%;margin-top:10px">⚠️ گزارش این نقاشی</button><div class="dnote">${note}</div>`;
+ const rb=$("dreport");if(rb)rb.onclick=async()=>{rb.disabled=true;rb.textContent="در حال ارسال گزارش…";
+  try{const r=await api("/api/drw/report",{gid:D.gid,rnd:D.rnd});const msgs={ok:"گزارش برای پشتیبانی ارسال شد.",duplicate:"این نقاشی را قبلاً گزارش کردی.",no_support:"پشتیبانی در دسترس نیست؛ گزارش ثبت نشد.",db_error:"ثبت گزارش ناموفق بود.",report_unavailable:"الان امکان گزارش وجود ندارد.",no_drawing:"اول باید نقاشی ثبت شده باشد."};toast(msgs[r.error]||msgs[r.ok?"ok":""]||"گزارش ارسال نشد.");}
+  catch(e){toast("ارسال گزارش ناموفق بود.")}finally{rb.disabled=false;rb.textContent="⚠️ گزارش این نقاشی"}}
+}
 function drResultHTML(g){
  const L=g.last_round,me=g.me,last=g.rnd>=g.rounds;
  const rows=L.items.map(it=>`<div class="drow ${it.st==="ok"?"w":it.st==="wrong"?"l":""}"><span class="rk">${it.st==="ok"?"✅":it.st==="wrong"?"❌":"⏳"}</span><span class="nm2">${esc(it.name)}${it.id===me?" (تو)":""}</span><span class="st">${it.st==="ok"?"درست":it.st==="wrong"?"غلط":"جواب نداد"}</span><b>${it.pts?"+"+fa(it.pts):fa(0)}</b></div>`).join("");

@@ -6,7 +6,7 @@
   ۱) توی گروه یکی می‌نویسه «نقاشی 20» → شرط ۲۰ الماس از سازنده کم می‌شه و پیام لابی میاد.
   ۲) بقیه «پیوستن» رو می‌زنن (شرط از هرکدوم کم می‌شه). «ورود به مینی‌اپ» بازی رو براشون باز می‌کنه.
   ۳) سازنده «شروع بازی» رو می‌زنه، یا ۱۲۰ ثانیه بعد (اگه حداقل ۲ نفر باشن) خودکار شروع می‌شه؛ با ۴ نفر فوراً.
-  ۴) بازی ۴ دوره. هر دور یه نفر (به‌نوبت) یه کلمهٔ مخفی می‌گیره و ۳۰ ثانیه نقاشی می‌کشه؛ بقیه بین ۴ گزینه حدس می‌زنن.
+  ۴) بازی ۴ دوره. هر دور یه نفر (به‌نوبت) یه کلمهٔ مخفی می‌گیره و ۳۰ ثانیه نقاشی می‌کشه؛ بقیه بین ۱۸ گزینه حدس می‌زنن.
      هر کی زودتر درست حدس بزنه امتیاز بیشتری می‌گیره؛ نقاش هم به‌ازای هر حدس درست امتیاز می‌گیره.
   ۵) آخر هر دور ۵ ثانیه نتیجهٔ همون دور نشون داده می‌شه؛ آخر بازی نتیجهٔ کل + برنده و بازنده‌ها.
   ۶) برنده کل جایزه رو منهای ۵٪ مالیات می‌گیره (اگه مساوی بشن، بین بالاترین‌ها تقسیم می‌شه؛ اگه هیچ‌کس امتیاز نگرفت، شرط‌ها برمی‌گرده).
@@ -19,6 +19,7 @@
 """
 import asyncio
 import html
+import io
 import json
 import logging
 import os
@@ -89,6 +90,19 @@ WORDS = {
     "fun": ["گیتار", "پیانو", "کادو", "بادکنک", "تاج", "شمشیر", "گنج", "دوربین", "ماسک", "ویولن", "شطرنج", "تاس",
             "پرچم", "طبل", "بلیط", "نقشه", "کمان", "فوتبال", "بیلیارد", "تلسکوپ"],
 }
+
+
+class DrawReport(Base):
+    __tablename__ = "draw_reports"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    game_id = Column(Integer, nullable=False, index=True)
+    round_no = Column(Integer, nullable=False)
+    reporter_id = Column(Integer, nullable=False)
+    drawer_id = Column(Integer, nullable=False)
+    status = Column(String(12), default="pending")
+    created = Column(Integer, default=0)
+    decided_by = Column(Integer, nullable=True)
+    decision = Column(String(12), nullable=True)
 
 
 class DrawGame(Base):
@@ -176,8 +190,8 @@ def _pick_word(g):
     same = [w for w in WORDS[cat] if w != word]
     other = [w for c, ws in WORDS.items() if c != cat for w in ws if w != word]
     for _ in range(20):
-        opts = random.sample(same, 2) + random.sample(other, 1) + [word]
-        if len(set(opts)) == 4:
+        opts = random.sample(same, min(8, len(same))) + random.sample(other, 9) + [word]
+        if len(set(opts)) == 18:
             break
     random.shuffle(opts)
     return word, opts
@@ -659,6 +673,15 @@ async def api(path, uid, data):
                         _end_round(g)       # همه جواب دادن → دور زودتر تموم می‌شه
                     else:
                         _save(g)
+        elif path == "/api/drw/report":
+            if g["status"] != "playing" or g.get("phase") != "draw" or _drawer(g)["id"] == uid:
+                err = "report_unavailable"
+            elif not g.get("ops"):
+                err = "no_drawing"
+            else:
+                result = await _create_report(g, uid, _app[0].bot)
+                if result != "ok":
+                    err = result
         elif path != "/api/drw/state":
             return {"game": None, "error": "not_found"}
         res = {"game": state_for(g, uid, data)}
@@ -715,10 +738,162 @@ async def tick(context):
         logger.exception("draw: tick failed")
 
 
+async def _report_decision(update, context):
+    q = update.callback_query
+    parts = (q.data or "").split(":")
+    if len(parts) != 4:
+        await q.answer()
+        return
+    try:
+        rid, decision = int(parts[2]), parts[3]
+    except Exception:
+        await q.answer("درخواست نامعتبره.", show_alert=True)
+        return
+    try:
+        import selfbot
+        allowed = set(getattr(selfbot, "SUPPORT_IDS", set()))
+        allowed.update(getattr(selfbot, "ADMIN_IDS", set()))
+    except Exception:
+        allowed = set()
+    if q.from_user.id not in allowed:
+        await q.answer("فقط پشتیبانی می‌تونه بررسی کنه.", show_alert=True)
+        return
+    s = get_session()
+    try:
+        r = s.get(DrawReport, rid)
+        if not r or r.status != "pending":
+            await q.answer("این گزارش قبلاً بررسی شده یا وجود نداره.", show_alert=True)
+            return
+        r.status = "approved" if decision == "ok" else "rejected"
+        r.decided_by = q.from_user.id
+        r.decision = decision
+        s.commit()
+        amount = 5 if decision == "ok" else -2
+        _cm().change(r.reporter_id, Decimal(amount))
+        try:
+            await context.bot.send_message(r.reporter_id,
+                "✅ گزارش نقاشی تأیید شد؛ ۵ الماس به حسابت اضافه شد." if decision == "ok"
+                else "❌ گزارش نقاشی رد شد؛ ۲ الماس از حسابت کم شد.")
+        except Exception:
+            pass
+        try:
+            await q.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await q.answer("بررسی ثبت شد.")
+    except Exception:
+        s.rollback()
+        logger.exception("draw: report decision failed")
+        await q.answer("خطا در ثبت بررسی.", show_alert=True)
+    finally:
+        s.close()
+
+
+async def _create_report(g, uid, bot):
+    s = get_session()
+    try:
+        exists = s.query(DrawReport).filter_by(game_id=g["id"], round_no=g.get("rnd", 0),
+                                               reporter_id=uid).first()
+        if exists:
+            return "duplicate"
+        r = DrawReport(game_id=g["id"], round_no=g.get("rnd", 0), reporter_id=uid,
+                       drawer_id=_drawer(g)["id"], status="pending", created=_now())
+        s.add(r)
+        s.commit()
+        rid = r.id
+    except Exception:
+        s.rollback()
+        logger.exception("draw: report save failed")
+        return "db_error"
+    finally:
+        s.close()
+    try:
+        import selfbot
+        support = set(getattr(selfbot, "SUPPORT_IDS", set()))
+        support.update(getattr(selfbot, "ADMIN_IDS", set()))
+    except Exception:
+        support = set()
+    if not support:
+        s = get_session()
+        try:
+            r = s.get(DrawReport, rid)
+            if r:
+                r.status = "unrouted"
+                s.commit()
+        finally:
+            s.close()
+        return "no_support"
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    dr = _drawer(g)
+    summary = (f"⚠️ <b>گزارش نقاشی</b>\\nبازی: <code>{g['id']}</code> | دور: {g.get('rnd')}\\n"
+               f"گزارش‌دهنده: <code>{uid}</code>\\nنقاش: <code>{dr['id']}</code> ({_esc(dr['name'])})\\n"
+               f"کلمهٔ مخفی: <b>{_esc(g.get('word'))}</b>\\nتعداد خطوط ثبت‌شده: {len(g.get('ops') or [])}")
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ تأیید (+۵ الماس)", callback_data=f"drw:report:{rid}:ok"),
+        InlineKeyboardButton("❌ رد (−۲ الماس)", callback_data=f"drw:report:{rid}:no")
+    ]])
+    # پیش‌نمایش واقعی نقاشی برای اینکه پشتیبانی بتواند محتوا را بررسی کند.
+    preview = None
+    try:
+        from PIL import Image, ImageDraw
+        image = Image.new("RGB", (700, 700), "#fffef9")
+        pen = ImageDraw.Draw(image)
+        palette = ["#111111", "#ff1744", "#ff6d00", "#ffd600", "#76ff03", "#00c853",
+                   "#00e5ff", "#2979ff", "#651fff", "#d500f9", "#ff4081", "#8d5524", "#9e9e9e", "#fffef9"]
+        widths = [6, 14, 34]
+        for op in (g.get("ops") or [])[:MAX_OPS]:
+            if op.get("clr"):
+                image = Image.new("RGB", (700, 700), "#fffef9")
+                pen = ImageDraw.Draw(image)
+                continue
+            pts = op.get("p") or []
+            if len(pts) < 2:
+                continue
+            coords = [(max(0, min(700, int(pts[i] * .7))), max(0, min(700, int(pts[i+1] * .7)))
+                       ) for i in range(0, len(pts)-1, 2)]
+            if len(coords) == 1:
+                x, y = coords[0]
+                w = widths[max(0, min(2, int(op.get("w", 1))))]
+                c = palette[max(0, min(13, int(op.get("c", 0))))]
+                pen.ellipse((x-w/2, y-w/2, x+w/2, y+w/2), fill=c)
+            else:
+                pen.line(coords, fill=palette[max(0, min(13, int(op.get("c", 0))))],
+                         width=widths[max(0, min(2, int(op.get("w", 1))))], joint="curve")
+        bio = io.BytesIO()
+        image.save(bio, format="PNG")
+        bio.seek(0)
+        preview = bio
+    except Exception:
+        logger.exception("draw: report preview generation failed")
+    sent = 0
+    for sid in support:
+        try:
+            if preview:
+                preview.seek(0)
+                await bot.send_photo(sid, photo=preview, caption=summary, parse_mode="HTML", reply_markup=kb)
+            else:
+                await bot.send_message(sid, summary, parse_mode="HTML", reply_markup=kb)
+            sent += 1
+        except Exception:
+            logger.warning("draw: cannot notify support %s", sid)
+    if not sent:
+        s = get_session()
+        try:
+            r = s.get(DrawReport, rid)
+            if r:
+                r.status = "unrouted"
+                s.commit()
+        finally:
+            s.close()
+        return "no_support"
+    return "ok"
+
+
 def setup(app):
     from telegram.ext import CallbackQueryHandler, MessageHandler, filters
     _app[0] = app
     database.Base.metadata.create_all(database.engine)
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS & filters.Regex(_PAT), cmd_new), group=-12)
-    app.add_handler(CallbackQueryHandler(cb, pattern=r"^drw:"), group=-21)
+    app.add_handler(CallbackQueryHandler(_report_decision, pattern=r"^drw:report:\\d+:(ok|no)$"), group=-22)
+    app.add_handler(CallbackQueryHandler(cb, pattern=r"^drw:(?!report:).+"), group=-21)
     app.job_queue.run_repeating(tick, interval=1, first=8, name="draw-tick")
