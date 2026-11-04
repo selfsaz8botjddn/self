@@ -28,7 +28,7 @@ import re
 import time
 from decimal import Decimal, ROUND_DOWN
 
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import BigInteger, Column, Integer, String, Text
 
 import database
 from database import Base, get_session
@@ -53,6 +53,9 @@ PER_SEC = 3             # + برای هر ثانیهٔ باقی‌مونده
 FIRST_BONUS = 25        # اولین حدس درست دور
 DRAWER_PER = 40         # نقاش به‌ازای هر حدس درست
 DRAWER_ALL_BONUS = 30   # اگه همه درست حدس بزنن
+
+REPORT_OK_REWARD = 5      # گزارش درست باشه → این‌قدر الماس به گزارش‌دهنده
+REPORT_BAD_PENALTY = 2    # گزارش اشتباه باشه → این‌قدر الماس از گزارش‌دهنده کم می‌شه
 
 NCOL = 14               # تعداد رنگ‌های پالت (اندیس ۱۳ = پاک‌کن)
 NWID = 3                # تعداد قلم‌ها
@@ -93,15 +96,17 @@ WORDS = {
 
 
 class DrawReport(Base):
-    __tablename__ = "draw_reports"
+    # جدول جدید با BigInteger: آیدی‌های تلگرام (مثلاً 7433300089) از حد Integer پستگرس بزرگ‌ترن
+    # و ثبت گزارش با «ثبت گزارش ناموفق بود» خطا می‌داد.
+    __tablename__ = "draw_reports_v2"
     id = Column(Integer, primary_key=True, autoincrement=True)
     game_id = Column(Integer, nullable=False, index=True)
     round_no = Column(Integer, nullable=False)
-    reporter_id = Column(Integer, nullable=False)
-    drawer_id = Column(Integer, nullable=False)
+    reporter_id = Column(BigInteger, nullable=False)
+    drawer_id = Column(BigInteger, nullable=False)
     status = Column(String(12), default="pending")
     created = Column(Integer, default=0)
-    decided_by = Column(Integer, nullable=True)
+    decided_by = Column(BigInteger, nullable=True)
     decision = Column(String(12), nullable=True)
 
 
@@ -163,7 +168,7 @@ def _refund_all(g):
 
 def _active_of(uid):
     for g in GAMES.values():
-        if g["status"] in ("lobby", "playing") and any(p["id"] == uid for p in g["players"]):
+        if g["status"] in ("lobby", "playing") and any(p["id"] == uid and not p.get("out") for p in g["players"]):
             return g
     return None
 
@@ -199,7 +204,13 @@ def _pick_word(g):
 
 def _start_round(g):
     g["rnd"] += 1
-    g["drawer"] = (g["rnd"] - 1) % len(g["players"])
+    n = len(g["players"])
+    i = (g["rnd"] - 1) % n
+    for _ in range(n):
+        if not g["players"][i].get("out"):
+            break
+        i = (i + 1) % n
+    g["drawer"] = i
     word, opts = _pick_word(g)
     g["word"], g["options"] = word, opts
     g.setdefault("used", []).append(word)
@@ -222,9 +233,11 @@ def _begin(g):
 def _end_round(g):
     dr = _drawer(g)
     items, ok_n = [], 0
+    n_guessers = 0
     for p in g["players"]:
-        if p["id"] == dr["id"]:
+        if p["id"] == dr["id"] or p.get("out"):
             continue
+        n_guessers += 1
         gu = (g.get("guesses") or {}).get(str(p["id"]))
         if gu is None:
             items.append({"id": p["id"], "name": p["name"], "st": "none", "pts": 0})
@@ -234,7 +247,7 @@ def _end_round(g):
         else:
             items.append({"id": p["id"], "name": p["name"], "st": "wrong", "pts": 0})
     bonus = 0
-    if ok_n and ok_n == len(g["players"]) - 1:
+    if ok_n and ok_n == n_guessers and not dr.get("out"):
         bonus = DRAWER_ALL_BONUS
         dr["score"] += bonus
     g["last_round"] = {"rnd": g["rnd"], "drawer": dr["id"], "drawer_name": dr["name"], "word": g["word"],
@@ -247,13 +260,22 @@ def _end_round(g):
 
 def _finish(g):
     ps = g["players"]
-    top = max(p["score"] for p in ps)
+    alive = [p for p in ps if not p.get("out")]
+    left_any = len(alive) < len(ps)
     n = len(ps)
     pot = g["bet"] * n
     g["status"] = "done"
     g["phase"] = "end"
     g["dirty"] = True
-    if top <= 0:
+    if left_any:
+        # کسی از بازی خارج شده → خارج‌شده می‌بازه؛ برنده بین بقیه تعیین می‌شه (حریف تنها = برنده)
+        top = max(p["score"] for p in alive) if alive else 0
+        winners = [p for p in alive if p["score"] == top]
+        g["left_forfeit"] = True
+    else:
+        top = max(p["score"] for p in ps)
+        winners = None
+    if not left_any and top <= 0:
         # هیچ‌کس امتیاز نگرفت → شرط‌ها برمی‌گرده
         g["all_zero"] = True
         g["winners"] = []
@@ -264,7 +286,8 @@ def _finish(g):
         _save(g)
         _refund_all(g)
         return
-    winners = [p for p in ps if p["score"] == top]
+    if winners is None:
+        winners = [p for p in ps if p["score"] == top]
     payout = (Decimal(pot) * (1 - TAX)).quantize(Decimal("0.1"), ROUND_DOWN)
     each = (payout / len(winners)).quantize(Decimal("0.1"), ROUND_DOWN)
     paid = each * len(winners)
@@ -272,10 +295,34 @@ def _finish(g):
     g["payout"] = str(paid)
     g["each"] = str(each)
     g["tax"] = str(Decimal(pot) - paid)
-    g["net"] = {str(p["id"]): str(each - g["bet"]) if p["score"] == top else str(-g["bet"]) for p in ps}
+    wids = {p["id"] for p in winners}
+    g["net"] = {str(p["id"]): str(each - g["bet"]) if p["id"] in wids else str(-g["bet"]) for p in ps}
     _save(g)            # اول وضعیت «تمام‌شده» ذخیره می‌شه، بعد پرداخت (جلوگیری از پرداخت دوباره)
     for p in winners:
         _pay(p["id"], each)
+
+
+def _leave(g, uid):
+    """بازیکن از بازیِ در حال اجرا خارج می‌شه: می‌بازه و شرطش می‌سوزه؛ اگه فقط یه نفر بمونه برنده می‌شه."""
+    p = _pl(g, uid)
+    if not p or p.get("out") or g["status"] != "playing":
+        return False
+    was_drawer = g.get("phase") == "draw" and _drawer(g)["id"] == uid
+    p["out"] = True
+    p["left"] = True
+    alive = [x for x in g["players"] if not x.get("out")]
+    if len(alive) <= 1:
+        _finish(g)
+        return True
+    if g.get("phase") == "draw":
+        dr = _drawer(g)
+        guessers = [x for x in g["players"] if x["id"] != dr["id"] and not x.get("out")]
+        if was_drawer or not guessers or all(str(x["id"]) in g["guesses"] for x in guessers):
+            _end_round(g)
+            return True
+    g["dirty"] = True
+    _save(g)
+    return True
 
 
 def _cancel(g, why):
@@ -569,7 +616,7 @@ def state_for(g, uid, data=None):
         "rnd": g.get("rnd", 0), "rounds": ROUNDS, "drawer": drawer,
         "draw_sec": DRAW_SEC, "result_sec": RESULT_SEC, "lobby_sec": LOBBY_SEC,
         "left": max(0, g["deadline"] - now) if g["status"] in ("lobby", "playing") else 0,
-        "players": [{"id": p["id"], "idx": i, "name": p["name"], "score": p["score"],
+        "players": [{"id": p["id"], "idx": i, "name": p["name"], "score": p["score"], "out": bool(p.get("out")),
                      "ans": bool(playing and g.get("phase") == "draw" and str(p["id"]) in gs)}
                     for i, p in enumerate(g["players"])],
         "word": g.get("word") if playing and (uid == drawer or g.get("phase") == "result") else None,
@@ -577,7 +624,7 @@ def state_for(g, uid, data=None):
         "my": ({"opt": mine["opt"], "ok": mine["ok"], "pts": mine["pts"]} if mine else None),
         "last_round": g.get("last_round"),
         "winners": g.get("winners"), "payout": g.get("payout"), "each": g.get("each"), "tax": g.get("tax"),
-        "net": g.get("net"), "all_zero": bool(g.get("all_zero")),
+        "net": g.get("net"), "all_zero": bool(g.get("all_zero")), "forfeit": bool(g.get("left_forfeit")),
         "ops": ops[start:start + OPS_CHUNK], "from": start, "total": total, "reset": reset,
     }
     return out
@@ -630,7 +677,15 @@ async def api(path, uid, data):
     err = None
     async with _LOCK:
         _step(g)
-        if path == "/api/drw/ops":
+        me_p = _pl(g, uid)
+        if path == "/api/drw/leave":
+            if g["status"] != "playing" or not me_p or me_p.get("out"):
+                err = "not_draw"
+            else:
+                _leave(g, uid)
+        elif me_p and me_p.get("out") and path in ("/api/drw/ops", "/api/drw/guess", "/api/drw/report"):
+            err = "left"
+        elif path == "/api/drw/ops":
             if g["status"] != "playing" or g.get("phase") != "draw":
                 err = "not_draw"
             elif _drawer(g)["id"] != uid:
@@ -669,7 +724,8 @@ async def api(path, uid, data):
                         _pl(g, uid)["score"] += pts
                         _drawer(g)["score"] += DRAWER_PER
                     g["guesses"][str(uid)] = {"opt": opt, "ok": ok, "pts": pts}
-                    if all(str(p["id"]) in g["guesses"] for p in g["players"] if p["id"] != _drawer(g)["id"]):
+                    if all(str(p["id"]) in g["guesses"] for p in g["players"]
+                           if p["id"] != _drawer(g)["id"] and not p.get("out")):
                         _end_round(g)       # همه جواب دادن → دور زودتر تموم می‌شه
                     else:
                         _save(g)
@@ -746,6 +802,8 @@ async def _report_decision(update, context):
         return
     try:
         rid, decision = int(parts[2]), parts[3]
+        if decision not in ("ok", "no"):
+            raise ValueError
     except Exception:
         await q.answer("درخواست نامعتبره.", show_alert=True)
         return
@@ -758,35 +816,48 @@ async def _report_decision(update, context):
     if q.from_user.id not in allowed:
         await q.answer("فقط پشتیبانی می‌تونه بررسی کنه.", show_alert=True)
         return
+    reporter = None
     s = get_session()
     try:
-        r = s.get(DrawReport, rid)
+        # قفل ردیف تا دو نفر همزمان یک گزارش رو تأیید/رد نکنن (روی SQLite نادیده گرفته می‌شه)
+        r = s.query(DrawReport).filter(DrawReport.id == rid).with_for_update().first()
         if not r or r.status != "pending":
             await q.answer("این گزارش قبلاً بررسی شده یا وجود نداره.", show_alert=True)
             return
         r.status = "approved" if decision == "ok" else "rejected"
         r.decided_by = q.from_user.id
         r.decision = decision
+        reporter = r.reporter_id
         s.commit()
-        amount = 5 if decision == "ok" else -2
-        _cm().change(r.reporter_id, Decimal(amount))
-        try:
-            await context.bot.send_message(r.reporter_id,
-                "✅ گزارش نقاشی تأیید شد؛ ۵ الماس به حسابت اضافه شد." if decision == "ok"
-                else "❌ گزارش نقاشی رد شد؛ ۲ الماس از حسابت کم شد.")
-        except Exception:
-            pass
-        try:
-            await q.edit_message_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-        await q.answer("بررسی ثبت شد.")
     except Exception:
         s.rollback()
         logger.exception("draw: report decision failed")
         await q.answer("خطا در ثبت بررسی.", show_alert=True)
+        return
     finally:
         s.close()
+    amount = REPORT_OK_REWARD if decision == "ok" else -REPORT_BAD_PENALTY
+    _pay(reporter, amount)
+    try:
+        await context.bot.send_message(
+            reporter,
+            f"✅ گزارش نقاشی‌ات بررسی شد و درست بود؛ {REPORT_OK_REWARD} الماس به حسابت اضافه شد." if decision == "ok"
+            else f"❌ گزارش نقاشی‌ات بررسی شد و اشتباه بود؛ {REPORT_BAD_PENALTY} الماس از حسابت کم شد.")
+    except Exception:
+        pass
+    try:
+        await q.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    try:
+        who = _esc(q.from_user.first_name or q.from_user.id)
+        await q.message.reply_text(
+            (f"✅ گزارش درست تشخیص داده شد (+{REPORT_OK_REWARD} 💎 برای گزارش‌دهنده)" if decision == "ok"
+             else f"❌ گزارش اشتباه تشخیص داده شد (−{REPORT_BAD_PENALTY} 💎 از گزارش‌دهنده)") + f"\nبررسی: {who}",
+            parse_mode="HTML")
+    except Exception:
+        pass
+    await q.answer("بررسی ثبت شد.")
 
 
 async def _create_report(g, uid, bot):
@@ -825,12 +896,18 @@ async def _create_report(g, uid, bot):
         return "no_support"
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     dr = _drawer(g)
-    summary = (f"⚠️ <b>گزارش نقاشی</b>\\nبازی: <code>{g['id']}</code> | دور: {g.get('rnd')}\\n"
-               f"گزارش‌دهنده: <code>{uid}</code>\\nنقاش: <code>{dr['id']}</code> ({_esc(dr['name'])})\\n"
-               f"کلمهٔ مخفی: <b>{_esc(g.get('word'))}</b>\\nتعداد خطوط ثبت‌شده: {len(g.get('ops') or [])}")
+    summary = (f"⚠️ <b>گزارش نقاشی — نیاز به تأیید</b>\n"
+               f"بازی: <code>{g['id']}</code> | دور: {g.get('rnd')}\n"
+               f"گزارش‌دهنده: <code>{uid}</code>\n"
+               f"نقاش: <code>{dr['id']}</code> ({_esc(dr['name'])})\n"
+               f"کلمهٔ مخفی: <b>{_esc(g.get('word'))}</b>\n"
+               f"تعداد خطوط ثبت‌شده: {len(g.get('ops') or [])}\n\n"
+               f"👀 نقاشی رو ببین و تصمیم بگیر:\n"
+               f"✅ اگه گزارش <b>درست</b> بود → {REPORT_OK_REWARD} الماس به گزارش‌دهنده اضافه می‌شه.\n"
+               f"❌ اگه گزارش <b>اشتباه</b> بود → {REPORT_BAD_PENALTY} الماس از گزارش‌دهنده کم می‌شه.")
     kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ تأیید (+۵ الماس)", callback_data=f"drw:report:{rid}:ok"),
-        InlineKeyboardButton("❌ رد (−۲ الماس)", callback_data=f"drw:report:{rid}:no")
+        InlineKeyboardButton(f"✅ گزارش درسته (+{REPORT_OK_REWARD})", callback_data=f"drw:report:{rid}:ok"),
+        InlineKeyboardButton(f"❌ گزارش غلطه (−{REPORT_BAD_PENALTY})", callback_data=f"drw:report:{rid}:no")
     ]])
     # پیش‌نمایش واقعی نقاشی برای اینکه پشتیبانی بتواند محتوا را بررسی کند.
     preview = None
@@ -894,6 +971,6 @@ def setup(app):
     _app[0] = app
     database.Base.metadata.create_all(database.engine)
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS & filters.Regex(_PAT), cmd_new), group=-12)
-    app.add_handler(CallbackQueryHandler(_report_decision, pattern=r"^drw:report:\\d+:(ok|no)$"), group=-22)
+    app.add_handler(CallbackQueryHandler(_report_decision, pattern=r"^drw:report:\d+:(ok|no)$"), group=-22)
     app.add_handler(CallbackQueryHandler(cb, pattern=r"^drw:(?!report:).+"), group=-21)
     app.job_queue.run_repeating(tick, interval=1, first=8, name="draw-tick")

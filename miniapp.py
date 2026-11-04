@@ -276,7 +276,8 @@ async def _route(method, path, headers, body):
     if path in ("/api/me", "/api/toggle", "/api/snk/state", "/api/snk/roll",
                 "/api/snk/packs", "/api/snk/pack_add", "/api/snk/chat",
                 "/api/self/state", "/api/self/act", "/api/self/dialogs",
-                "/api/drw/state", "/api/drw/ops", "/api/drw/guess", "/api/drw/report"):
+                "/api/drw/state", "/api/drw/ops", "/api/drw/guess", "/api/drw/report", "/api/drw/leave",
+                "/api/snk/leave"):
         if method != "POST":
             return _resp(405, {"error": "method"})
         auth = headers.get("authorization", "")
@@ -709,8 +710,10 @@ h1{display:flex;align-items:center;gap:8px;font-size:19px}h1 .ico{width:24px;hei
 .dsz a{min-width:46px;height:40px;padding:0 8px;border-radius:12px;background:var(--card2);border:1px solid var(--line);display:grid;place-items:center;cursor:pointer;font-size:18px}
 .dsz a i{display:block;border-radius:50%;background:#fff}
 .dsz a.on{background:linear-gradient(135deg,var(--ac1),var(--ac2));border-color:transparent}
-.dopts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
-.dop{margin:0;padding:17px 6px;font-size:17px;border-radius:16px;background:var(--card2);box-shadow:none;border:1.5px solid rgba(124,92,255,.5)}
+.dopts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-flow:row;gap:5px;margin-top:12px;direction:rtl}
+.dop{margin:0;padding:6px 1px;min-height:50px;width:100%;font-size:11px;line-height:1.3;font-weight:700;border-radius:10px;background:var(--card2);box-shadow:none;border:1.5px solid rgba(124,92,255,.5);display:flex;align-items:center;justify-content:center;text-align:center;overflow-wrap:anywhere;word-break:break-word;white-space:normal}
+.dpl.out{opacity:.4}
+.xbtn{border-color:rgba(255,77,109,.7)!important;color:#ff8a9d!important}
 .dop:disabled{opacity:.55}
 .dop.ok{background:linear-gradient(135deg,#00c853,#27d98a);border-color:transparent;opacity:1}
 .dop.no{background:linear-gradient(135deg,#ff1744,#ff6d6d);border-color:transparent;opacity:1}
@@ -1201,7 +1204,7 @@ async function rollDice(r){
 
 /* ---------- تخته ---------- */
 const COLORS=["#e5484d","#2e9e5b","#2481cc","#f5a524"];
-const GE={not_player:"تو توی این بازی نیستی.",no_game:"این بازی فعال نیست.",not_your_turn:"نوبت تو نیست.",rate:"کمی صبر کن."};
+const GE={not_player:"تو توی این بازی نیستی.",no_game:"این بازی فعال نیست.",not_your_turn:"نوبت تو نیست.",already_out:"از بازی خارج شدی.",rate:"کمی صبر کن."};
 let GID=null,GS=null,SIG="",LSEQ=-1,LEFT=0,LAT=0,PT=null,RB=false,FIRST=true,STOPAT=0,PRAC=false,PG=null,PON=false;
 let TKE={},DISP={},Q=Promise.resolve();
 /* خونه‌ها روی خود عکس: ۱۰ ستون × ۱۰ ردیف؛ ردیف یازدهم (پایین) خونهٔ «شروع»ه. مختصات به پیکسلِ عکس اصلی ۱۰۲۴×۱۵۳۶ */
@@ -1218,12 +1221,13 @@ function setTok(p,n,jump,step){
  if(step){e.classList.remove("step");void e.offsetWidth;e.classList.add("step")}
  const xy=tokPos(n,p.idx);e.style.left=xy[0]+"%";e.style.top=xy[1]+"%";e.style.opacity=p.out?".35":"1";DISP[p.id]=n}
 function shell(){
- $("g").innerHTML=`<div class="gbar"><button class="alt sm" id="gback">‹ بازگشت</button><button class="alt sm" id="gsnd">${SFX.on?"🔊 صدا":"🔇 بی‌صدا"}</button></div>
+ $("g").innerHTML=`<div class="gbar"><button class="alt sm" id="gback">‹ بازگشت</button><button class="alt sm xbtn" id="gexit" style="display:none">🚪 خروج</button><button class="alt sm" id="gsnd">${SFX.on?"🔊 صدا":"🔇 بی‌صدا"}</button></div>
  <div id="gtop"></div>
  <div class="bw" id="bw"><img src="/board.webp" alt="" decoding="async"><div class="tkl" id="tkl"></div></div>
  <div class="lg" id="glog"></div>
  <div class="dkw" id="gdock"><div class="dk"><div class="dice3" id="dc">${diceHTML()}</div><div class="dkr"><div class="dkt" id="dkt"></div><button id="rb">🎲 تاس بنداز</button></div></div></div>`;
  $("gback").onclick=()=>{stopGame();showTab(VIEW==="dash"?"games":VIEW);reloadDash()};
+ $("gexit").onclick=()=>askExit(leaveSnk);
  $("gsnd").onclick=()=>{SFX.set(!SFX.on);$("gsnd").textContent=SFX.on?"🔊 صدا":"🔇 بی‌صدا";if(SFX.on)SFX.tick()};
  $("rb").onclick=roll;setDice(1,false);
  TKE={};DISP={};Q=Promise.resolve()}
@@ -1234,6 +1238,9 @@ function openGame(gid,prac){
  shell();FIRST=true;SIG="";LSEQ=-1;STOPAT=0;
  if(PRAC){PON=true;applyG(PG)}
  else{$("gtop").innerHTML='<div class="msg">در حال بارگذاری…</div>';poll();PT=setInterval(poll,1300)}}
+function askExit(go){const m="اگه از بازی خارج بشی می‌بازی، شرطت می‌سوزه و حریفت برنده می‌شه. مطمئنی؟";
+ if(tg&&tg.showConfirm)tg.showConfirm(m,ok=>{if(ok)go()});else if(confirm(m))go()}
+async function leaveSnk(){try{const r=await api("/api/snk/leave",{gid:GID});if(r.game)applyG(r.game);if(r.error)toast(GE[r.error]||"خطا")}catch(e){toast(e.message)}}
 function stopGame(){clearInterval(PT);PT=null;PON=false;GS=null;if(typeof drStop==="function")drStop()}
 function reloadDash(){api("/api/me").then(s=>renderAll(s)).catch(()=>{})}
 async function poll(){try{const r=await api("/api/snk/state",{gid:GID});
@@ -1280,6 +1287,9 @@ function renderTop(g){
  else if(g.status==="playing")top=g.practice?(mine?`🎲 <b>نوبت توئه!</b>`:`نوبت <b>${nm(g.turn)}</b>…`):(mine?`🎲 <b>نوبت توئه!</b> <span id="tm">${fa(LEFT)}</span> ثانیه`:`نوبت <b>${nm(g.turn)}</b> · <span id="tm">${fa(LEFT)}</span> ثانیه`);
  else if(g.status==="done")top=g.winner===me?(g.practice?`🏆 <b>بردی!</b> (تمرین)`:`🏆 <b>برنده شدی!</b><br>${fa(g.payout)} الماس به حسابت اضافه شد`):`🏁 <b>${nm(g.winner)}</b> برنده شد`;
  else top="❌ بازی لغو شد؛ شرط‌ها برگشت";
+ const mep=g.players.find(p=>p.id===me);
+ if(g.status==="playing"&&mep&&mep.out)top="🚪 از بازی خارج شدی؛ شرطت سوخت";
+ const exb=$("gexit");if(exb)exb.style.display=(g.status==="playing"&&!g.practice&&mep&&!mep.out)?"":"none";
  const pl=g.players.map(p=>`<div class="pl ${p.id===g.turn&&g.status==="playing"?"cur":""} ${p.out?"out":""}"><u style="background:${COLORS[p.idx%4]}"></u><span>${esc(p.name)}${p.id===me&&!g.practice?" (تو)":""}</span><b>${p.pos?fa(p.pos):"شروع"}</b></div>`).join("");
  const L=g.last,ev=L?(L.ev==="ladder"?" 🪜":L.ev==="snake"?" 🐍":""):"";
  const lt=L?`${nm(L.pid)}: ${fa(L.r)} ← ${fa(L.from)} به ${fa(L.to)}${ev}${L.auto?" (خودکار)":""}`:"";
@@ -1327,7 +1337,7 @@ function pRoll(){
 
 /* ================= بازی نقاشی ================= */
 const DCOL=["#111111","#ff1744","#ff6d00","#ffd600","#76ff03","#00c853","#00e5ff","#2979ff","#651fff","#d500f9","#ff4081","#8d5524","#9e9e9e","#fffef9"],DW=[6,14,34],DPAPER="#fffef9";
-const DE={not_player:"تو توی این بازی نیستی.",no_game:"این بازی فعال نیست.",not_draw:"الان زمان حدس زدن نیست.",drawer:"نقاش نمی‌تونه حدس بزنه 😅",already:"قبلاً جواب دادی.",bad_option:"گزینه نامعتبره.",not_drawer:"الان نوبت نقاشی تو نیست.",wait_drawing:"صبر کن نقاش شروع کنه ✏️",stale:"دور عوض شد.",rate:"کمی صبر کن."};
+const DE={not_player:"تو توی این بازی نیستی.",no_game:"این بازی فعال نیست.",not_draw:"الان زمان حدس زدن نیست.",drawer:"نقاش نمی‌تونه حدس بزنه 😅",already:"قبلاً جواب دادی.",bad_option:"گزینه نامعتبره.",not_drawer:"الان نوبت نقاشی تو نیست.",wait_drawing:"صبر کن نقاش شروع کنه ✏️",stale:"دور عوض شد.",left:"تو از بازی خارج شدی.",rate:"کمی صبر کن."};
 let DR=null;
 function drNew(gid){return{gid:gid,rnd:null,n:0,fresh:true,GS:null,sig:"",dsig:"",osig:"",LEFT:0,LAT:0,col:0,wid:1,q:[],cur:null,drawing:false,inflight:false,polling:false,pt:null,ft:null,busyG:false,lastSec:-1,myk:"",prevRnd:-1,done:false,stopAt:0,confetti:false,tmv:"",sc:{},cx:null}}
 function drStop(){const D=DR;if(!D)return;clearInterval(D.pt);clearInterval(D.ft);DR=null;try{tg&&tg.enableVerticalSwipes&&tg.enableVerticalSwipes()}catch(e){}}
@@ -1339,11 +1349,12 @@ function openDraw(gid){
  DR=drNew(gid);drShell();
  drPoll();DR.pt=setInterval(drPoll,800);DR.ft=setInterval(drFlush,300)}
 function drShell(){
- $("g").innerHTML=`<div class="gbar"><button class="alt sm" id="dback">‹ بازگشت</button><button class="alt sm" id="dsnd">${SFX.on?"🔊 صدا":"🔇 بی‌صدا"}</button></div>
+ $("g").innerHTML=`<div class="gbar"><button class="alt sm" id="dback">‹ بازگشت</button><button class="alt sm xbtn" id="dexit" style="display:none">🚪 خروج</button><button class="alt sm" id="dsnd">${SFX.on?"🔊 صدا":"🔇 بی‌صدا"}</button></div>
  <div id="dtop"><div class="msg">در حال بارگذاری…</div></div>
  <div class="dcw" id="dcw"><canvas id="dcv" width="1000" height="1000"></canvas><div class="dov" id="dov"></div></div>
  <div id="ddock"></div>`;
  $("dback").onclick=()=>{drStop();showTab(VIEW==="dash"?"games":VIEW);reloadDash()};
+ $("dexit").onclick=()=>askExit(async()=>{const D=DR;if(!D)return;try{const r=await api("/api/drw/leave",{gid:D.gid,rnd:D.rnd,since:D.n});if(DR===D&&r.game)drApply(r.game);if(r.error)toast(DE[r.error]||"خطا")}catch(e){toast(e.message)}});
  $("dsnd").onclick=()=>{SFX.set(!SFX.on);$("dsnd").textContent=SFX.on?"🔊 صدا":"🔇 بی‌صدا";if(SFX.on)SFX.tick()};
  const cv=$("dcv");DR.cx=cv.getContext("2d");drClear();
  cv.addEventListener("pointerdown",drDown);cv.addEventListener("pointermove",drMove);
@@ -1437,9 +1448,9 @@ function drApply(g){
  if(k!==D.myk){if(k==="ok"){SFX.ladder();haptic("success")}else if(k==="no"){SFX.lose();haptic("error")}D.myk=k}
  if(g.status==="done"&&!D.done){D.done=true;const iw=(g.winners||[]).includes(g.me);if(!g.all_zero){SFX[iw?"win":"lose"]();haptic(iw?"success":"warning")}}
  /* بالا (امتیازها) */
- const sig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.players.map(p=>[p.score,p.ans])]);
+ const sig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.players.map(p=>[p.score,p.ans,p.out])]);
  if(sig!==D.sig){D.sig=sig;drRenderTop(g)}
- const dsig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.my&&g.my.opt,g.my&&g.my.ok,g.total>0,g.word]);
+ const dsig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.my&&g.my.opt,g.my&&g.my.ok,g.total>0,g.word,(g.players.find(p=>p.id===g.me)||{}).out]);
  if(dsig!==D.dsig){D.dsig=dsig;drRenderDock(g)}
  const osig=JSON.stringify([g.status,g.phase,g.rnd,g.last_round&&g.last_round.rnd]);
  if(osig!==D.osig){D.osig=osig;drOverlay(g)}
@@ -1451,16 +1462,20 @@ function drRenderTop(g){
  const dn=(g.players.find(p=>p.id===g.drawer)||{}).name||"—";
  const isD=g.drawer===me;
  const pls=g.players.map(p=>{const prev=DR.sc[p.id];DR.sc[p.id]=p.score;const up=prev!==undefined&&p.score>prev;
-  return `<div class="dpl ${p.id===g.drawer&&g.status==="playing"?"dr":""} ${p.id===me?"me":""} ${up?"up":""}"><u style="background:${COLORS[p.idx%4]}">${esc((p.name||"?").trim().charAt(0)||"?")}</u><span>${esc(p.name)}${p.id===g.drawer&&g.status==="playing"?" ✏️":""}${p.ans?" ✅":""}</span><b>${fa(p.score)}</b></div>`}).join("");
+  return `<div class="dpl ${p.id===g.drawer&&g.status==="playing"?"dr":""} ${p.id===me?"me":""} ${up?"up":""} ${p.out?"out":""}"><u style="background:${COLORS[p.idx%4]}">${esc((p.name||"?").trim().charAt(0)||"?")}</u><span>${esc(p.name)}${p.id===g.drawer&&g.status==="playing"?" ✏️":""}${p.ans?" ✅":""}${p.out?" 🚪":""}</span><b>${fa(p.score)}</b></div>`}).join("");
+ const mep=g.players.find(p=>p.id===me),exb=$("dexit");
+ if(exb)exb.style.display=(g.status==="playing"&&mep&&!mep.out)?"":"none";
  let head;
  if(g.status==="lobby")head=`<div class="dhd"><div class="dtt"><b>🎨 نقاشی و حدس</b><small>منتظر شروع بازی…</small></div>${ring}</div>`;
  else if(g.status==="playing")head=`<div class="dhd"><div class="dch">دور ${fa(g.rnd)} از ${fa(g.rounds)}</div><div class="dtt"><b>${g.phase==="result"?"📊 نتیجهٔ دور":isD?"✏️ نوبت نقاشی توئه!":esc(dn)+" داره نقاشی می‌کشه"}</b><small>${g.phase==="result"?"آماده شو برای دور بعد":isD?"کلمه رو فقط تو می‌بینی؛ ۳۰ ثانیه وقت داری":"بین گزینه‌ها حدس بزن چی می‌کشه!"}</small></div>${ring}</div>`;
  else head=`<div class="dhd"><div class="dtt"><b>${g.status==="done"?"🏁 بازی تموم شد":"❌ بازی لغو شد"}</b><small>${g.status==="done"?"نتیجهٔ نهایی پایین‌تره":"شرط‌ها برگشت"}</small></div></div>`;
  $("dtop").innerHTML=head+`<div class="dpls">${pls}</div>`;DR.tmv=""}
 function drRenderDock(g){
- const dk=$("ddock");if(!dk)return;
+ const D=DR,dk=$("ddock");if(!dk||!D)return;
  if(g.status!=="playing"){dk.innerHTML=g.status==="done"||g.status==="cancelled"||g.status==="refunded"?`<button id="dback2" style="margin-top:12px">‹ بازگشت به بازی‌ها</button>`:"";
   const b=$("dback2");if(b)b.onclick=()=>$("dback").click();return}
+ const mp=g.players.find(p=>p.id===g.me);
+ if(mp&&mp.out){dk.innerHTML=`<div class="dnote">🚪 از بازی خارج شدی؛ شرطت سوخت</div>`;return}
  if(g.drawer===g.me){
   if(g.phase!=="draw"){dk.innerHTML=`<div class="dnote">نقاشی تموم شد 👏</div>`;return}
   dk.innerHTML=`<div class="dword"><small>کلمهٔ تو</small><b>${esc(g.word||"")}</b><small>بدون نوشتن؛ فقط با نقاشی!</small></div>
@@ -1478,7 +1493,7 @@ function drRenderDock(g){
  else note=g.total?"کدوم گزینه درسته؟ هرچی زودتر، امتیاز بیشتر ⚡":"⏳ منتظر شروع نقاشی…";
  dk.innerHTML=`<div class="dopts">${opts}</div><button class="alt" id="dreport" style="width:100%;margin-top:10px">⚠️ گزارش این نقاشی</button><div class="dnote">${note}</div>`;
  const rb=$("dreport");if(rb)rb.onclick=async()=>{rb.disabled=true;rb.textContent="در حال ارسال گزارش…";
-  try{const r=await api("/api/drw/report",{gid:D.gid,rnd:D.rnd});const msgs={ok:"گزارش برای پشتیبانی ارسال شد.",duplicate:"این نقاشی را قبلاً گزارش کردی.",no_support:"پشتیبانی در دسترس نیست؛ گزارش ثبت نشد.",db_error:"ثبت گزارش ناموفق بود.",report_unavailable:"الان امکان گزارش وجود ندارد.",no_drawing:"اول باید نقاشی ثبت شده باشد."};toast(msgs[r.error]||msgs[r.ok?"ok":""]||"گزارش ارسال نشد.");}
+  try{const r=await api("/api/drw/report",{gid:D.gid,rnd:D.rnd});const msgs={duplicate:"این نقاشی را قبلاً گزارش کردی.",no_support:"پشتیبانی در دسترس نیست؛ گزارش ثبت نشد.",db_error:"ثبت گزارش ناموفق بود.",report_unavailable:"الان امکان گزارش وجود ندارد.",no_drawing:"اول باید نقاشی ثبت شده باشد.",left:"تو از بازی خارج شدی.",internal:"خطای داخلی؛ دوباره امتحان کن."};toast(r.error?(msgs[r.error]||"گزارش ارسال نشد."):"✅ گزارش ثبت شد و برای تأیید پشتیبانی رفت؛ نتیجه برات میاد.",3500);}
   catch(e){toast("ارسال گزارش ناموفق بود.")}finally{rb.disabled=false;rb.textContent="⚠️ گزارش این نقاشی"}}
 }
 function drResultHTML(g){
@@ -1496,7 +1511,8 @@ function drFinalHTML(g){
  const rows=rk.map((p,i)=>{const win=!g.all_zero&&w.includes(p.id);
   return `<div class="drow ${g.all_zero?"":win?"w":"l"}"><span class="rk">${medal[i]}</span><span class="nm2">${esc(p.name)}${p.id===me?" (تو)":""}</span><span class="st">${g.all_zero?"مساوی":win?"برنده 🏆":"بازنده"}</span><b>${fa(p.score)}</b></div>`}).join("");
  const prize=g.all_zero?"":`<div class="dnext">🎁 جایزه: <b>${fa(String(Number(g.payout)))}</b> الماس (۵٪ مالیات کسر شد)</div>`;
- return `<div class="dcard">${head}<div style="margin-top:8px">${rows}</div>${prize}</div>`}
+ const fo=g.forfeit?`<div class="dnext">🚪 یکی از بازیکن‌ها از بازی خارج شد</div>`:"";
+ return `<div class="dcard">${head}${fo}<div style="margin-top:8px">${rows}</div>${prize}</div>`}
 function drOverlay(g){
  const ov=$("dov");if(!ov)return;DR.tmv="";
  if(g.status==="playing"&&g.phase==="result"&&g.last_round){ov.innerHTML=drResultHTML(g);ov.className="dov on";return}

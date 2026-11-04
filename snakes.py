@@ -123,7 +123,7 @@ def _refund_all(g):
 # ---------- کمکی‌ها ----------
 def _active_of(uid):
     for g in GAMES.values():
-        if g["status"] in ("lobby", "playing") and any(p["id"] == uid for p in g["players"]):
+        if g["status"] in ("lobby", "playing") and any(p["id"] == uid and not p["out"] for p in g["players"]):
             return g
     return None
 
@@ -195,6 +195,21 @@ def _play(g, p, auto):
     if r == 6 and not p["out"]:
         g["deadline"] = _now() + TURN_SEC
     else:
+        _next(g)
+    _save(g)
+
+
+def _leave(g, p):
+    """بازیکن خودش از بازی خارج می‌شه: می‌بازه (شرطش می‌سوزه)؛ اگه فقط یه نفر بمونه اون برنده‌ست."""
+    was_turn = _cur(g) is p
+    p["out"] = True
+    p["left"] = True
+    _log(g, f"🚪 {p['name']} از بازی خارج شد")
+    alive = [x for x in g["players"] if not x["out"]]
+    if len(alive) == 1:
+        _finish(g, alive[0])
+        return
+    if was_turn:
         _next(g)
     _save(g)
 
@@ -579,6 +594,18 @@ async def api(path, uid, data):
         return {"ok": True, "game": state_for(g, uid)}
     if path == "/api/snk/state":
         return {"game": state_for(g, uid) if g else None}
+    if path == "/api/snk/leave":
+        bot = _app[0].bot
+        async with _LOCK:
+            if not g or g["status"] != "playing":
+                return {"game": state_for(g, uid) if g else None, "error": "no_game"}
+            me_p = next((x for x in g["players"] if x["id"] == uid), None)
+            if not me_p or me_p["out"]:
+                return {"game": state_for(g, uid), "error": "already_out"}
+            _leave(g, me_p)
+        if g["status"] == "done":
+            await _announce(bot, g)
+        return {"game": state_for(g, uid)}
     if path == "/api/snk/roll":
         bot = _app[0].bot
         async with _LOCK:
