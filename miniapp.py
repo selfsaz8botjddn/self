@@ -712,14 +712,32 @@ h1{display:flex;align-items:center;gap:8px;font-size:19px}h1 .ico{width:24px;hei
 .dsz a{min-width:46px;height:40px;padding:0 8px;border-radius:12px;background:var(--card2);border:1px solid var(--line);display:grid;place-items:center;cursor:pointer;font-size:18px}
 .dsz a i{display:block;border-radius:50%;background:#fff}
 .dsz a.on{background:linear-gradient(135deg,var(--ac1),var(--ac2));border-color:transparent}
-.dopts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-flow:row;gap:5px;margin-top:12px;direction:rtl}
-.dop{margin:0;padding:6px 1px;min-height:50px;width:100%;font-size:11px;line-height:1.3;font-weight:700;border-radius:10px;background:var(--card2);box-shadow:none;border:1.5px solid rgba(124,92,255,.5);display:flex;align-items:center;justify-content:center;text-align:center;overflow-wrap:anywhere;word-break:break-word;white-space:normal}
+.dopts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-flow:row;gap:6px;margin-top:12px;direction:rtl}
+.dop{margin:0;padding:6px 3px;min-height:48px;width:100%;font-size:12.5px;line-height:1.3;font-weight:700;border-radius:10px;background:var(--card2);box-shadow:none;border:1.5px solid rgba(124,92,255,.5);display:flex;align-items:center;justify-content:center;text-align:center;overflow-wrap:anywhere;word-break:break-word;white-space:normal}
 .dpl.out{opacity:.4}
 .dchat{margin-top:12px;background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:8px}
 .dcm{max-height:112px;overflow:auto;font-size:12.5px;line-height:1.7}
 .dqe{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:6px 0}
 .dqe a{font-size:20px;cursor:pointer;padding:2px 6px;border-radius:9px;background:rgba(255,255,255,.07)}
 .dci{display:flex;gap:6px}.dci input{flex:1;min-width:0}
+.dpl{position:relative}
+.bubw{position:absolute;left:50%;bottom:calc(100% - 2px);width:0;height:0;z-index:9;pointer-events:none}
+.bub{position:absolute;bottom:0;left:-14px;width:112px;height:103px;transform-origin:50% 100%;animation:bpop .38s cubic-bezier(.2,1.5,.4,1)}
+.bub.nopop{animation:none}.bub.out{animation:bout .25s ease-in forwards}
+.bub svg{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.45))}
+.bub.flip svg{transform:scaleX(-1)}
+.bub .bin{position:absolute;left:14%;right:12%;top:12%;height:52%;display:flex;align-items:center;justify-content:center;text-align:center;color:#17261c;font-weight:800;font-size:11px;line-height:1.35;overflow:hidden;direction:rtl}
+.bub .bem{font-size:36px;line-height:1;animation:bwig 1.1s ease-in-out infinite}
+@keyframes bpop{0%{opacity:0;transform:scale(.3)}100%{opacity:1;transform:scale(1)}}
+@keyframes bout{to{opacity:0;transform:translateY(-8px) scale(.9)}}
+@keyframes bwig{0%,100%{transform:rotate(-9deg) scale(1)}50%{transform:rotate(9deg) scale(1.2)}}
+.dqt{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.dqt a{padding:7px 11px;border-radius:99px;background:rgba(255,255,255,.08);border:1px solid var(--line);font-size:12.5px;cursor:pointer}
+.dqt a:active{transform:scale(.94)}
+.dwr{position:absolute;top:8px;left:8px;right:8px;display:flex;flex-direction:column;gap:5px;align-items:flex-start;pointer-events:none;z-index:3}
+.dwc{max-width:100%;background:rgba(255,77,109,.93);color:#fff;border-radius:99px;padding:4px 11px;font-size:12px;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,.3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;animation:dwin .25s ease-out,dwout .4s ease-in 4.3s forwards}
+@keyframes dwin{0%{opacity:0;transform:translateY(-8px)}100%{opacity:1;transform:none}}
+@keyframes dwout{to{opacity:0}}
 .xbtn{border-color:rgba(255,77,109,.7)!important;color:#ff8a9d!important}
 .dop:disabled{opacity:.55}
 .dop.ok{background:linear-gradient(135deg,#00c853,#27d98a);border-color:transparent;opacity:1}
@@ -1087,7 +1105,7 @@ function renderGames(s){
   <div class="gc"><div class="dimg"></div><div class="gb">
   <h3>🖌 نقاشی و حدس</h3>
   <p>۲ تا ۴ نفر، شرط‌بندی با الماس. ۴ دور؛ هر دور یکی نقاشی می‌کشه و بقیه حدس می‌زنن!</p>
-  <ul class="rl"><li>هر دور ۳۰ ثانیه؛ نقاش یه کلمهٔ مخفی می‌گیره و فقط با نقاشی توضیحش می‌ده</li><li>بقیه بین ۱۸ گزینه حدس می‌زنن؛ هرچی سریع‌تر، امتیاز بیشتر ⚡</li><li>نقاش به‌ازای هر حدس درست امتیاز می‌گیره</li><li>آخر هر دور ۵ ثانیه نتیجه نشون داده می‌شه؛ آخر بازی برنده و بازنده‌ها مشخص می‌شن</li><li>جایزه = کل شرط‌ها منهای ۵٪ مالیات</li></ul>
+  <ul class="rl"><li>هر دور ۵۰ ثانیه؛ نقاش یه کلمهٔ مخفی می‌گیره و فقط با نقاشی توضیحش می‌ده</li><li>بقیه بین ۱۲ گزینه حدس می‌زنن؛ هرچی سریع‌تر، امتیاز بیشتر ⚡</li><li>نقاش به‌ازای هر حدس درست امتیاز می‌گیره</li><li>حدس غلط هر نفر (کدوم گزینه رو زده) چند ثانیه روی نقاشی نشون داده می‌شه</li><li>چت آزاد نیست؛ فقط متن‌های آماده یا استیکر که بالای سر خودت توی ابر می‌آد</li><li>آخر هر دور ۵ ثانیه نتیجه نشون داده می‌شه؛ آخر بازی برنده و بازنده‌ها مشخص می‌شن</li><li>جایزه = کل شرط‌ها منهای ۵٪ مالیات</li></ul>
   ${dcont}
   <div class="msg">برای ساخت میز: توی گروه بنویس «نقاشی 20» (عدد = شرط به الماس) و بقیه رو دعوت کن.</div>
   </div></div>
@@ -1145,7 +1163,7 @@ async function loadGlobalPacks(){
  }catch(e){el.innerHTML=""}
 }
 const QEMO=["👏","😂","🔥","😮","😭","👍","🎉","😡"];
-const CERR={slow:"یه کم آروم‌تر ✋",empty_message:"پیام خالیه.",pack_not_found:"این پک دیگه وجود نداره.",bad_sticker:"استیکر نامعتبره.",no_game:"این بازی فعال نیست.",rate:"کمی صبر کن."};
+const CERR={slow:"یه کم آروم‌تر ✋",empty_message:"پیام خالیه.",pack_not_found:"این پک دیگه وجود نداره.",bad_sticker:"استیکر نامعتبره.",spec_chat:"تماشاچی‌ها نمی‌تونن پیام بفرستن.",bad_request:"پیام نامعتبره.",no_game:"این بازی فعال نیست.",rate:"کمی صبر کن."};
 async function pickSticker(send){
  try{
   const [a,b]=await Promise.all([api("/api/snk/gpacks"),api("/api/snk/packs")]);
@@ -1377,7 +1395,7 @@ function pRoll(){
 const DCOL=["#111111","#ff1744","#ff6d00","#ffd600","#76ff03","#00c853","#00e5ff","#2979ff","#651fff","#d500f9","#ff4081","#8d5524","#9e9e9e","#fffef9"],DW=[6,14,34],DPAPER="#fffef9";
 const DE={not_player:"تو توی این بازی نیستی.",no_game:"این بازی فعال نیست.",not_draw:"الان زمان حدس زدن نیست.",drawer:"نقاش نمی‌تونه حدس بزنه 😅",already:"قبلاً جواب دادی.",bad_option:"گزینه نامعتبره.",not_drawer:"الان نوبت نقاشی تو نیست.",wait_drawing:"صبر کن نقاش شروع کنه ✏️",stale:"دور عوض شد.",left:"تو از بازی خارج شدی.",rate:"کمی صبر کن."};
 let DR=null;
-function drNew(gid){return{gid:gid,rnd:null,n:0,fresh:true,GS:null,sig:"",dsig:"",osig:"",csig:"",LEFT:0,LAT:0,col:0,wid:1,q:[],cur:null,drawing:false,inflight:false,polling:false,pt:null,ft:null,busyG:false,lastSec:-1,myk:"",prevRnd:-1,done:false,stopAt:0,confetti:false,tmv:"",sc:{},cx:null}}
+function drNew(gid){return{gid:gid,rnd:null,n:0,fresh:true,GS:null,sig:"",dsig:"",osig:"",csig:"",LEFT:0,LAT:0,col:0,wid:1,q:[],cur:null,drawing:false,inflight:false,polling:false,pt:null,ft:null,busyG:false,lastSec:-1,myk:"",prevRnd:-1,done:false,stopAt:0,confetti:false,tmv:"",sc:{},cx:null,bub:{},seen:{},seenW:{},wrnd:null,cb:0}}
 function drStop(){const D=DR;if(!D)return;clearInterval(D.pt);clearInterval(D.ft);DR=null;try{tg&&tg.enableVerticalSwipes&&tg.enableVerticalSwipes()}catch(e){}}
 function openDraw(gid){
  stopGame();
@@ -1389,17 +1407,13 @@ function openDraw(gid){
 function drShell(){
  $("g").innerHTML=`<div class="gbar"><button class="alt sm" id="dback">‹ بازگشت</button><button class="alt sm xbtn" id="dexit" style="display:none">🚪 خروج</button><button class="alt sm" id="dsnd">${SFX.on?"🔊 صدا":"🔇 بی‌صدا"}</button></div>
  <div id="dtop"><div class="msg">در حال بارگذاری…</div></div>
- <div class="dcw" id="dcw"><canvas id="dcv" width="1000" height="1000"></canvas><div class="dov" id="dov"></div></div>
+ <div class="dcw" id="dcw"><canvas id="dcv" width="1000" height="1000"></canvas><div class="dov" id="dov"></div><div class="dwr" id="dwr"></div></div>
  <div id="ddock"></div>
- <div class="dchat" id="dchat"><div class="dcm" id="dcm"></div><div class="dqe" id="dqe">${QEMO.map(e=>`<a data-q="${e}">${e}</a>`).join("")}</div><div class="dci"><input id="dct" placeholder="پیام بنویس…" maxlength="300"><button id="dcs" style="width:auto">ارسال</button><button id="dcst" class="alt" style="width:auto">🎨</button></div></div>`;
+ <div class="dchat" id="dchat"></div>`;
  $("dback").onclick=()=>{drStop();showTab(VIEW==="dash"?"games":VIEW);reloadDash()};
  $("dexit").onclick=()=>askExit(async()=>{const D=DR;if(!D)return;try{const r=await api("/api/drw/leave",{gid:D.gid,rnd:D.rnd,since:D.n});if(DR===D&&r.game)drApply(r.game);if(r.error)toast(DE[r.error]||"خطا")}catch(e){toast(e.message)}});
  $("dsnd").onclick=()=>{SFX.set(!SFX.on);$("dsnd").textContent=SFX.on?"🔊 صدا":"🔇 بی‌صدا";if(SFX.on)SFX.tick()};
  const cv=$("dcv");DR.cx=cv.getContext("2d");drClear();
- $("dcs").onclick=async()=>{const el=$("dct"),t=el.value.trim();if(t&&await drChat({kind:"text",text:t}))el.value=""};
- $("dct").onkeydown=e=>{if(e.key==="Enter")$("dcs").click()};
- $("dcst").onclick=()=>pickSticker(drChat);
- document.querySelectorAll("#dqe [data-q]").forEach(a=>a.onclick=()=>drChat({kind:"text",text:a.dataset.q}));
  cv.addEventListener("pointerdown",drDown);cv.addEventListener("pointermove",drMove);
  cv.addEventListener("pointerup",drUp);cv.addEventListener("pointercancel",drUp);
  $("ddock").onclick=e=>{
@@ -1418,10 +1432,46 @@ async function drChat(payload){
   return true}
  catch(e){toast(e.message);return false}
 }
-function drRenderChat(g){
- const el=$("dcm");if(!el)return;
- el.innerHTML=(g.chat||[]).slice(-12).map(m=>`<div><b>${esc(m.name)}:</b> ${m.kind==="sticker"?"🎨 "+esc(m.emoji||"🙂"):esc(m.text||"")}</div>`).join("")||'<div class="hint">هنوز پیامی نیست.</div>';
- el.scrollTop=el.scrollHeight}
+const CLOUDSH='<ellipse cx="228" cy="195" rx="195" ry="112"/><circle cx="150" cy="105" r="75"/><circle cx="262" cy="88" r="68"/><circle cx="365" cy="95" r="62"/><circle cx="405" cy="170" r="55"/><circle cx="85" cy="170" r="58"/><circle cx="100" cy="255" r="55"/><circle cx="195" cy="275" r="58"/><circle cx="315" cy="275" r="55"/><circle cx="385" cy="235" r="55"/>';
+const CLOUDSVG='<svg viewBox="0 -10 490 450" xmlns="http://www.w3.org/2000/svg"><g fill="#2bff9b" stroke="#2bff9b" stroke-width="46" stroke-linejoin="round">'+CLOUDSH+'</g><g fill="#fdffe8">'+CLOUDSH+'</g><ellipse cx="100" cy="350" rx="46" ry="29" fill="#2bff9b"/><ellipse cx="100" cy="350" rx="24" ry="6" fill="#fdffe8"/><ellipse cx="48" cy="402" rx="30" ry="22" fill="#2bff9b"/></svg>';
+function drBubHTML(m){
+ const inner=m.kind==="sticker"?`<div class="bem">${esc(m.emoji||"🙂")}</div>`:`<span>${esc(m.text||"")}</span>`;
+ return CLOUDSVG+`<div class="bin">${inner}</div>`}
+function drBubShow(m,ms){
+ const D=DR;if(!D)return;
+ D.bub[m.uid]={html:drBubHTML(m),until:Date.now()+ms,shown:false,key:m.at+"-"+m.uid};
+ drBubSync()}
+function drBubSync(){
+ const D=DR;if(!D)return;
+ for(const uid in D.bub){
+  const b=D.bub[uid],w=document.getElementById("bw-"+uid);
+  if(!w)continue;
+  const cur=w.firstElementChild;
+  if(cur&&cur.dataset.k===b.key)continue;
+  w.innerHTML=`<div class="bub ${b.shown?"nopop":""}" data-k="${b.key}">${b.html}</div>`;
+  const el=w.firstElementChild,cr=w.parentElement.getBoundingClientRect();
+  const flip=(cr.left+cr.width/2)>window.innerWidth/2;
+  el.classList.toggle("flip",flip);
+  let left=flip?-98:-14;el.style.left=left+"px";
+  const r=el.getBoundingClientRect();
+  if(r.left<6)left+=6-r.left;else if(r.right>window.innerWidth-6)left-=r.right-(window.innerWidth-6);
+  el.style.left=left+"px";b.shown=true}}
+function drBubTick(){
+ const D=DR;if(!D)return;const now=Date.now();
+ for(const uid in D.bub){if(now>D.bub[uid].until){
+  const w=document.getElementById("bw-"+uid),el=w&&w.firstElementChild;delete D.bub[uid];
+  if(el){el.classList.add("out");setTimeout(()=>{if(el.parentNode)el.remove()},260)}}}}
+function drWrongChip(w){
+ const el=$("dwr");if(!el)return;
+ const c=document.createElement("div");c.className="dwc";c.textContent="❌ "+w.name+": «"+w.w+"»";
+ el.appendChild(c);while(el.children.length>3)el.firstChild.remove();
+ setTimeout(()=>{if(c.parentNode)c.remove()},4800)}
+function drRenderChatBar(g){
+ const el=$("dchat");if(!el)return;
+ if(g.spec){el.style.display="none";return}
+ el.innerHTML=`<div class="dqt">${(g.presets||[]).map((t,i)=>`<a data-q="${i}">${esc(t)}</a>`).join("")}</div><button id="dcst" class="alt" style="width:100%;margin-top:8px">🎨 ارسال استیکر</button>`;
+ el.querySelectorAll("[data-q]").forEach(a=>a.onclick=()=>{const t=((DR&&DR.GS&&DR.GS.presets)||[])[+a.dataset.q];if(t)drChat({kind:"text",text:t})});
+ const b=$("dcst");if(b)b.onclick=()=>pickSticker(drChat)}
 function drClear(){const D=DR;if(!D||!D.cx)return;D.cx.fillStyle=DPAPER;D.cx.fillRect(0,0,1000,1000)}
 function drawOp(o){
  const D=DR;if(!D||!D.cx)return;const cx=D.cx;
@@ -1504,8 +1554,18 @@ function drApply(g){
  if(k!==D.myk){if(k==="ok"){SFX.ladder();haptic("success")}else if(k==="no"){SFX.lose();haptic("error")}D.myk=k}
  if(g.status==="done"&&!D.done){D.done=true;const iw=(g.winners||[]).includes(g.me);if(!g.all_zero&&!g.spec){SFX[iw?"win":"lose"]();haptic(iw?"success":"warning")}}
  /* بالا (امتیازها) */
- const csig=JSON.stringify((g.chat||[]).map(m=>[m.at,m.uid,m.text||m.emoji||""]));
- if(csig!==D.csig){D.csig=csig;drRenderChat(g)}
+ if(!D.cb&&g.presets){D.cb=1;drRenderChatBar(g)}
+ /* پیام/استیکر تازه → ابر بالای سر بازیکن (۵ ثانیه) */
+ const nowS=g.now||Math.floor(Date.now()/1000);
+ for(const m of (g.chat||[])){
+  if(m.spec)continue;
+  const k=m.at+":"+m.uid+":"+(m.text||m.emoji||"");
+  if(D.seen[k])continue;D.seen[k]=1;
+  const age=nowS-m.at;
+  if(age<5)drBubShow(m,Math.max(1200,(5-age)*1000))}
+ /* جواب غلط → روی نقاشی نشون داده می‌شه */
+ if(D.wrnd!==g.rnd){D.wrnd=g.rnd;D.seenW={};const wr=$("dwr");if(wr)wr.innerHTML=""}
+ for(const w of (g.wrongs||[])){const k=g.rnd+":"+w.uid;if(D.seenW[k])continue;D.seenW[k]=1;drWrongChip(w)}
  const sig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.players.map(p=>[p.score,p.ans,p.out]),g.spec,g.watchers]);
  if(sig!==D.sig){D.sig=sig;drRenderTop(g)}
  const dsig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.my&&g.my.opt,g.my&&g.my.ok,g.total>0,g.word,(g.players.find(p=>p.id===g.me)||{}).out]);
@@ -1520,19 +1580,19 @@ function drRenderTop(g){
  const dn=(g.players.find(p=>p.id===g.drawer)||{}).name||"—";
  const isD=g.drawer===me;
  const pls=g.players.map(p=>{const prev=DR.sc[p.id];DR.sc[p.id]=p.score;const up=prev!==undefined&&p.score>prev;
-  return `<div class="dpl ${p.id===g.drawer&&g.status==="playing"?"dr":""} ${p.id===me?"me":""} ${up?"up":""} ${p.out?"out":""}"><u style="background:${COLORS[p.idx%4]}">${esc((p.name||"?").trim().charAt(0)||"?")}</u><span>${esc(p.name)}${p.id===g.drawer&&g.status==="playing"?" ✏️":""}${p.ans?" ✅":""}${p.out?" 🚪":""}</span><b>${fa(p.score)}</b></div>`}).join("");
+  return `<div class="dpl ${p.id===g.drawer&&g.status==="playing"?"dr":""} ${p.id===me?"me":""} ${up?"up":""} ${p.out?"out":""}"><div class="bubw" id="bw-${p.id}"></div><u style="background:${COLORS[p.idx%4]}">${esc((p.name||"?").trim().charAt(0)||"?")}</u><span>${esc(p.name)}${p.id===g.drawer&&g.status==="playing"?" ✏️":""}${p.ans?" ✅":""}${p.out?" 🚪":""}</span><b>${fa(p.score)}</b></div>`}).join("");
  const mep=g.players.find(p=>p.id===me),exb=$("dexit");
  if(exb)exb.style.display=(g.status==="playing"&&mep&&!mep.out)?"":"none";
  let head;
  if(g.status==="lobby")head=`<div class="dhd"><div class="dtt"><b>🎨 نقاشی و حدس</b><small>منتظر شروع بازی…</small></div>${ring}</div>`;
- else if(g.status==="playing")head=`<div class="dhd"><div class="dch">دور ${fa(g.rnd)} از ${fa(g.rounds)}</div><div class="dtt"><b>${g.phase==="result"?"📊 نتیجهٔ دور":isD?"✏️ نوبت نقاشی توئه!":esc(dn)+" داره نقاشی می‌کشه"}</b><small>${g.phase==="result"?"آماده شو برای دور بعد":isD?"کلمه رو فقط تو می‌بینی؛ ۳۰ ثانیه وقت داری":g.spec?"👀 تماشاچی هستی؛ کلمه مخفیه":"بین گزینه‌ها حدس بزن چی می‌کشه!"}</small></div>${ring}</div>`;
+ else if(g.status==="playing")head=`<div class="dhd"><div class="dch">دور ${fa(g.rnd)} از ${fa(g.rounds)}</div><div class="dtt"><b>${g.phase==="result"?"📊 نتیجهٔ دور":isD?"✏️ نوبت نقاشی توئه!":esc(dn)+" داره نقاشی می‌کشه"}</b><small>${g.phase==="result"?"آماده شو برای دور بعد":isD?"کلمه رو فقط تو می‌بینی؛ ${fa(g.draw_sec)} ثانیه وقت داری":g.spec?"👀 تماشاچی هستی؛ کلمه مخفیه":"بین گزینه‌ها حدس بزن چی می‌کشه!"}</small></div>${ring}</div>`;
  else head=`<div class="dhd"><div class="dtt"><b>${g.status==="done"?"🏁 بازی تموم شد":"❌ بازی لغو شد"}</b><small>${g.status==="done"?"نتیجهٔ نهایی پایین‌تره":"شرط‌ها برگشت"}</small></div></div>`;
- $("dtop").innerHTML=head+`<div class="dpls">${pls}</div>`+(g.watchers?`<div class="hint" style="text-align:center;margin-top:6px">👀 ${fa(g.watchers)} تماشاچی</div>`:"");DR.tmv=""}
+ $("dtop").innerHTML=head+`<div class="dpls">${pls}</div>`+(g.watchers?`<div class="hint" style="text-align:center;margin-top:6px">👀 ${fa(g.watchers)} تماشاچی</div>`:"");DR.tmv="";drBubSync()}
 function drRenderDock(g){
  const D=DR,dk=$("ddock");if(!dk||!D)return;
  if(g.status!=="playing"){dk.innerHTML=g.status==="done"||g.status==="cancelled"||g.status==="refunded"?`<button id="dback2" style="margin-top:12px">‹ بازگشت به بازی‌ها</button>`:"";
   const b=$("dback2");if(b)b.onclick=()=>$("dback").click();return}
- if(g.spec){dk.innerHTML=`<div class="dnote">👀 داری تماشا می‌کنی؛ پایین می‌تونی چت کنی</div>`;return}
+ if(g.spec){dk.innerHTML=`<div class="dnote">👀 داری تماشا می‌کنی</div>`;return}
  const mp=g.players.find(p=>p.id===g.me);
  if(mp&&mp.out){dk.innerHTML=`<div class="dnote">🚪 از بازی خارج شدی؛ شرطت سوخت</div>`;return}
  if(g.drawer===g.me){
@@ -1548,7 +1608,7 @@ function drRenderDock(g){
   return `<button class="dop ${cls}" data-o="${i}" ${(my||g.phase!=="draw"||!g.total)?"disabled":""}>${esc(w)}</button>`}).join("");
  let note;
  if(g.phase==="result")note="دور تموم شد؛ نتیجه بالاست 👆";
- else if(my)note=my.ok?`✅ درست بود! <b>+${fa(my.pts)}</b> امتیاز — منتظر بقیه…`:"❌ غلط بود؛ منتظر پایان دور…";
+ else if(my)note=my.ok?`✅ درست بود! <b>+${fa(my.pts)}</b> امتیاز — منتظر بقیه…`:`❌ «${esc((g.options||[])[my.opt]||"")}» غلط بود؛ منتظر پایان دور…`;
  else note=g.total?"کدوم گزینه درسته؟ هرچی زودتر، امتیاز بیشتر ⚡":"⏳ منتظر شروع نقاشی…";
  dk.innerHTML=`<div class="dopts">${opts}</div><button class="alt" id="dreport" style="width:100%;margin-top:10px">⚠️ گزارش این نقاشی</button><div class="dnote">${note}</div>`;
  const rb=$("dreport");if(rb)rb.onclick=async()=>{rb.disabled=true;rb.textContent="در حال ارسال گزارش…";
@@ -1587,6 +1647,7 @@ function drOverlay(g){
 /* ---- تایمر (محلی، هر ۰٫۲۵ ثانیه) ---- */
 setInterval(()=>{
  const D=DR;if(!D||!D.GS)return;const g=D.GS;
+ drBubTick();
  const run=g.status==="playing"||g.status==="lobby";
  const left=run?Math.max(0,D.LEFT-(Date.now()-D.LAT)/1000):0;
  const tot=g.status==="lobby"?g.lobby_sec:(g.phase==="result"?g.result_sec:g.draw_sec);

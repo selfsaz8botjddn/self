@@ -6,7 +6,7 @@
   ۱) توی گروه یکی می‌نویسه «نقاشی 20» → شرط ۲۰ الماس از سازنده کم می‌شه و پیام لابی میاد.
   ۲) بقیه «پیوستن» رو می‌زنن (شرط از هرکدوم کم می‌شه). «ورود به مینی‌اپ» بازی رو براشون باز می‌کنه.
   ۳) سازنده «شروع بازی» رو می‌زنه، یا ۱۲۰ ثانیه بعد (اگه حداقل ۲ نفر باشن) خودکار شروع می‌شه؛ با ۴ نفر فوراً.
-  ۴) بازی ۴ دوره. هر دور یه نفر (به‌نوبت) یه کلمهٔ مخفی می‌گیره و ۳۰ ثانیه نقاشی می‌کشه؛ بقیه بین ۱۸ گزینه حدس می‌زنن.
+  ۴) بازی ۴ دوره. هر دور یه نفر (به‌نوبت) یه کلمهٔ مخفی می‌گیره و ۵۰ ثانیه نقاشی می‌کشه؛ بقیه بین ۱۲ گزینه حدس می‌زنن.
      هر کی زودتر درست حدس بزنه امتیاز بیشتری می‌گیره؛ نقاش هم به‌ازای هر حدس درست امتیاز می‌گیره.
   ۵) آخر هر دور ۵ ثانیه نتیجهٔ همون دور نشون داده می‌شه؛ آخر بازی نتیجهٔ کل + برنده و بازنده‌ها.
   ۶) برنده کل جایزه رو منهای ۵٪ مالیات می‌گیره (اگه مساوی بشن، بین بالاترین‌ها تقسیم می‌شه؛ اگه هیچ‌کس امتیاز نگرفت، شرط‌ها برمی‌گرده).
@@ -41,7 +41,7 @@ MIN_PLAYERS = 2
 MAX_PLAYERS = 4
 ROUNDS = 4
 LOBBY_SEC = 120
-DRAW_SEC = 30
+DRAW_SEC = 50
 RESULT_SEC = 5
 TAX = Decimal("0.05")
 KEEP_DONE = 1800
@@ -57,9 +57,17 @@ DRAWER_ALL_BONUS = 30   # اگه همه درست حدس بزنن
 REPORT_OK_REWARD = 5      # گزارش درست باشه → این‌قدر الماس به گزارش‌دهنده
 REPORT_BAD_PENALTY = 2    # گزارش اشتباه باشه → این‌قدر الماس از گزارش‌دهنده کم می‌شه
 
+N_OPTIONS = 12          # تعداد گزینه‌های حدس (۱ درست + ۱۱ غلط)
+# متن‌های آمادهٔ چت توی نقاشی (چت آزاد حذف شده؛ فقط همین‌ها یا استیکر قابل ارسال‌ه)
+DRAW_PRESETS = [
+    "👏 آفرین!", "🔥 عالی کشیدی", "🎨 هنرمندی!", "😂 خیلی باحاله",
+    "😎 من فهمیدم", "🤔 هیچی نفهمیدم", "⏳ زود باش!", "😅 سخت بود",
+    "😮 وای!", "👍 باشه", "😭 باختم", "🤝 بازی خوبی بود",
+]
+
 NCOL = 14               # تعداد رنگ‌های پالت (اندیس ۱۳ = پاک‌کن)
 NWID = 3                # تعداد قلم‌ها
-MAX_OPS = 3500          # سقف خط‌های هر دور
+MAX_OPS = 5500          # سقف خط‌های هر دور
 OPS_PER_REQ = 40
 PTS_PER_OP = 240        # حداکثر عدد (۲ تا برای هر نقطه) توی هر خط
 OPS_CHUNK = 500         # حداکثر خطی که توی یک پاسخ برمی‌گرده
@@ -199,9 +207,10 @@ def _pick_word(g):
     cat, word = random.choice(pool)
     same = [w for w in WORDS[cat] if w != word]
     other = [w for c, ws in WORDS.items() if c != cat for w in ws if w != word]
+    n_same = min(5, len(same))
     for _ in range(20):
-        opts = random.sample(same, min(8, len(same))) + random.sample(other, 9) + [word]
-        if len(set(opts)) == 18:
+        opts = random.sample(same, n_same) + random.sample(other, N_OPTIONS - 1 - n_same) + [word]
+        if len(set(opts)) == N_OPTIONS:
             break
     random.shuffle(opts)
     return word, opts
@@ -632,6 +641,16 @@ def state_for(g, uid, data=None):
     gs = g.get("guesses") or {}
     mine = gs.get(str(uid)) if playing else None
     spec = not any(p["id"] == uid for p in g["players"])
+    # جواب‌های غلط (برای نمایش روی نقاشی): کی کدوم گزینه رو زد
+    wrongs = []
+    if playing:
+        for k, v in gs.items():
+            if v.get("ok"):
+                continue
+            pl = next((x for x in g["players"] if str(x["id"]) == str(k)), None)
+            opts = g.get("options") or []
+            if pl and isinstance(v.get("opt"), int) and 0 <= v["opt"] < len(opts):
+                wrongs.append({"uid": pl["id"], "name": pl["name"], "w": opts[v["opt"]]})
     out = {
         "id": g["id"], "status": g["status"], "phase": g.get("phase"), "bet": g["bet"],
         "pot": g["bet"] * len(g["players"]), "creator": g["creator"], "me": uid,
@@ -648,6 +667,7 @@ def state_for(g, uid, data=None):
         "winners": g.get("winners"), "payout": g.get("payout"), "each": g.get("each"), "tax": g.get("tax"),
         "net": g.get("net"), "all_zero": bool(g.get("all_zero")), "forfeit": bool(g.get("left_forfeit")),
         "spec": spec, "watchers": _snk().watchers(f"d{g['id']}"), "chat": (g.get("messages") or [])[-30:],
+        "now": now, "presets": DRAW_PRESETS, "wrongs": wrongs,
         "ops": ops[start:start + OPS_CHUNK], "from": start, "total": total, "reset": reset,
     }
     return out
@@ -701,21 +721,23 @@ async def api(path, uid, data):
     if not g:
         return {"game": None, "error": "no_game"}
     err = None
-    fwd = None
     async with _LOCK:
         _step(g)
         me_p = _pl(g, uid)
         if path == "/api/drw/chat":
-            name = me_p["name"] if me_p else str(data.get("_name") or "کاربر")
-            msg, e = _snk().build_chat_msg(uid, name, data, spec=not me_p)
-            if e:
-                err = e
+            kind = str(data.get("kind") or "text")
+            if not me_p:
+                err = "spec_chat"            # تماشاچی‌ها پیام/استیکر نمی‌فرستن (بالای سر کسی نمی‌شینه)
+            elif kind == "text" and " ".join(str(data.get("text") or "").split()) not in DRAW_PRESETS:
+                err = "bad_request"          # چت آزاد حذف شده؛ فقط متن‌های آماده
             else:
-                g.setdefault("messages", []).append(msg)
-                del g["messages"][:-50]
-                _save(g)
-                if msg.get("kind") == "sticker" and me_p:
-                    fwd = (g["chat"], msg["file_id"])
+                msg, e = _snk().build_chat_msg(uid, me_p["name"], data, spec=False)
+                if e:
+                    err = e
+                else:
+                    g.setdefault("messages", []).append(msg)
+                    del g["messages"][:-50]
+                    _save(g)                 # استیکر فقط توی مینی‌اپ نشون داده می‌شه؛ به گروه نمی‌ره
         elif path == "/api/drw/leave":
             if g["status"] != "playing" or not me_p or me_p.get("out"):
                 err = "not_draw"
@@ -779,11 +801,6 @@ async def api(path, uid, data):
         elif path != "/api/drw/state":
             return {"game": None, "error": "not_found"}
         res = {"game": state_for(g, uid, data)}
-    if fwd:
-        try:
-            await _app[0].bot.send_sticker(chat_id=fwd[0], sticker=fwd[1])
-        except Exception:
-            logger.info("draw: group sticker delivery failed", exc_info=True)
     if err:
         res["error"] = err
     return res
