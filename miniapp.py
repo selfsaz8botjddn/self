@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl
 logger = logging.getLogger(__name__)
 
 AUTH_MAX_AGE = 24 * 3600      # initData قدیمی‌تر از این پذیرفته نمی‌شه
-MAX_BODY = 16 * 1024
+MAX_BODY = 32 * 1024
 _app_ref = [None]
 _server = [None]
 
@@ -133,6 +133,7 @@ def build_state(uid, member=True, user=None):
         "member": bool(member),
         "support": cm.SUPPORT,
         "game": _game_of(uid),
+        "draw": _draw_of(uid),
     }
 
 
@@ -140,6 +141,14 @@ def _game_of(uid):
     try:
         import snakes
         return snakes.active_summary(uid)
+    except Exception:
+        return None
+
+
+def _draw_of(uid):
+    try:
+        import drawgame
+        return drawgame.active_summary(uid)
     except Exception:
         return None
 
@@ -266,7 +275,8 @@ async def _route(method, path, headers, body):
         return _resp(200, b, "image/webp", cache="public, max-age=86400")
     if path in ("/api/me", "/api/toggle", "/api/snk/state", "/api/snk/roll",
                 "/api/snk/packs", "/api/snk/pack_add", "/api/snk/chat",
-                "/api/self/state", "/api/self/act", "/api/self/dialogs"):
+                "/api/self/state", "/api/self/act", "/api/self/dialogs",
+                "/api/drw/state", "/api/drw/ops", "/api/drw/guess"):
         if method != "POST":
             return _resp(405, {"error": "method"})
         auth = headers.get("authorization", "")
@@ -291,6 +301,21 @@ async def _route(method, path, headers, body):
             if path == "/api/self/dialogs":
                 return _resp(200, await selfpanel.dialogs(uid, str(data.get("kind") or "slot"), str(data.get("q") or "")[:40]))
             return _resp(200, await selfpanel.act(uid, data))
+        if path.startswith("/api/drw/"):
+            if _limited(uid, 600, 60, "drw"):
+                return _resp(403, {"error": "rate"})
+            try:
+                data = json.loads(body.decode() or "{}")
+                if not isinstance(data, dict):
+                    raise ValueError
+            except Exception:
+                return _resp(400, {"error": "bad_request"})
+            import drawgame
+            try:
+                return _resp(200, await drawgame.api(path, uid, data))
+            except Exception:
+                logger.exception("miniapp: drawgame api failed (%s)", path)
+                return _resp(200, {"error": "internal"})
         if path.startswith("/api/snk/"):
             if _limited(uid, 200, 60, "snk"):
                 return _resp(403, {"error": "rate"})
@@ -412,6 +437,11 @@ def setup(app):
         snakes.setup(app)
     except Exception:
         logger.exception("miniapp: snakes setup failed")
+    try:
+        import drawgame
+        drawgame.setup(app)
+    except Exception:
+        logger.exception("miniapp: drawgame setup failed")
 
 
 # ---------- رابط کاربری ----------
@@ -639,6 +669,54 @@ h1{display:flex;align-items:center;gap:8px;font-size:19px}h1 .ico{width:24px;hei
 .bar{height:8px;border-radius:99px;background:rgba(255,255,255,.08);margin-top:12px;overflow:hidden}
 .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--ac1),var(--ac2));box-shadow:0 0 12px rgba(25,211,255,.7)}
 .ptime small{display:block;color:var(--hint);font-size:11.5px;margin-top:8px;line-height:1.7}
+
+/* ================= بازی نقاشی ================= */
+.dimg{height:112px;position:relative;background:radial-gradient(circle at 18% 30%,#ff4081 0,transparent 38%),radial-gradient(circle at 78% 22%,#ffd600 0,transparent 36%),radial-gradient(circle at 52% 92%,#00e5ff 0,transparent 44%),linear-gradient(135deg,#651fff,#2979ff)}
+.dimg::after{content:"🎨";position:absolute;inset:0;display:grid;place-items:center;font-size:56px;filter:drop-shadow(0 6px 14px rgba(0,0,0,.45))}
+.dhd{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px 12px}
+.dch{padding:5px 11px;border-radius:99px;font-size:12px;font-weight:800;background:linear-gradient(135deg,var(--ac1),var(--ac2));color:#fff;white-space:nowrap}
+.dtt{flex:1;min-width:0}.dtt b{display:block;font-size:14.5px}.dtt small{display:block;color:var(--hint);font-size:11.5px;margin-top:2px}
+.dring{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;position:relative;flex:none;background:conic-gradient(#19d3ff 360deg,rgba(255,255,255,.12) 0)}
+.dring::after{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--card)}
+.dring b{position:relative;z-index:1;font-size:18px}
+.dpls{display:flex;gap:6px;margin-top:8px}
+.dpl{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:7px 3px;font-size:11.5px}
+.dpl u{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;border:2px solid #fff;color:#fff;font-weight:800;font-size:13px;text-decoration:none}
+.dpl span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpl b{font-size:15px}
+.dpl.dr{outline:2px solid #ffd24d;box-shadow:0 0 14px rgba(255,210,77,.35)}.dpl.me{background:var(--card2)}
+.dpl.up{animation:dpup .7s ease-out}
+@keyframes dpup{0%{transform:scale(1)}35%{transform:scale(1.14);box-shadow:0 0 18px rgba(39,217,138,.7)}100%{transform:scale(1)}}
+.dcw{position:relative;width:100%;max-width:520px;margin:10px auto 0;aspect-ratio:1/1;border-radius:20px;overflow:hidden;background:#fffef9;box-shadow:0 0 0 3px rgba(124,92,255,.55),0 14px 40px rgba(124,92,255,.35)}
+#dcv{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+.dov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:10px;overflow:auto;background:rgba(9,13,27,.86);backdrop-filter:blur(6px)}
+.dov.on{display:flex;animation:dpop .35s ease-out}
+@keyframes dpop{0%{opacity:0;transform:scale(.92)}100%{opacity:1;transform:scale(1)}}
+.dcard{width:100%;text-align:center;margin:auto}.dcard small{color:var(--hint);font-size:12px;display:block;margin-top:3px}.dcard>b{display:block;font-size:17px;margin-top:4px}
+.dbig{font-size:46px;line-height:1.1}
+.dwd{font-size:32px;font-weight:800;margin:2px 0 8px;background:linear-gradient(135deg,#ffd24d,#ff7a59);-webkit-background-clip:text;background-clip:text;color:transparent}
+.drow{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:12px;padding:7px 10px;margin-top:5px;font-size:13px;text-align:right}
+.drow.w{background:rgba(39,217,138,.14);border-color:rgba(39,217,138,.4)}.drow.l{background:rgba(255,77,109,.1)}.drow.dr{background:rgba(255,210,77,.12)}
+.drow .nm2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.drow .st{color:var(--hint);font-size:11.5px}
+.dnext{margin-top:10px;font-size:12.5px;color:var(--hint)}.dnext b{color:#19d3ff;font-size:17px}
+.dword{margin-top:10px;text-align:center;padding:11px 10px;border-radius:18px;background:linear-gradient(135deg,rgba(124,92,255,.28),rgba(25,211,255,.2));border:1px solid rgba(124,92,255,.55)}
+.dword small{display:block;color:var(--hint);font-size:11.5px}.dword b{display:block;font-size:26px;margin:2px 0}
+.dtools{margin-top:10px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:12px 8px}
+.dsw{display:flex;flex-wrap:wrap;gap:9px;justify-content:center}
+.dsw a{width:31px;height:31px;border-radius:50%;border:2.5px solid rgba(255,255,255,.85);box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer;transition:transform .12s}
+.dsw a.on{transform:scale(1.3);box-shadow:0 0 0 3px #fff,0 0 16px currentColor}
+.dsz{display:flex;gap:8px;justify-content:center;margin-top:12px}
+.dsz a{min-width:46px;height:40px;padding:0 8px;border-radius:12px;background:var(--card2);border:1px solid var(--line);display:grid;place-items:center;cursor:pointer;font-size:18px}
+.dsz a i{display:block;border-radius:50%;background:#fff}
+.dsz a.on{background:linear-gradient(135deg,var(--ac1),var(--ac2));border-color:transparent}
+.dopts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.dop{margin:0;padding:17px 6px;font-size:17px;border-radius:16px;background:var(--card2);box-shadow:none;border:1.5px solid rgba(124,92,255,.5)}
+.dop:disabled{opacity:.55}
+.dop.ok{background:linear-gradient(135deg,#00c853,#27d98a);border-color:transparent;opacity:1}
+.dop.no{background:linear-gradient(135deg,#ff1744,#ff6d6d);border-color:transparent;opacity:1}
+.dnote{margin-top:10px;text-align:center;font-size:13px;color:var(--hint);line-height:1.8}
+.cf{position:absolute;top:-16px;width:9px;height:15px;border-radius:2px;animation:dfall 2.8s linear forwards;pointer-events:none}
+@keyframes dfall{to{transform:translateY(560px) rotate(600deg)}}
 </style></head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b69cff"/><stop offset="1" stop-color="#19d3ff"/></linearGradient></defs></svg>
 <h1 id="ttl">👤 پروفایل</h1>
@@ -973,6 +1051,7 @@ document.addEventListener("click",e=>{
 
 /* ---------- تب بازی‌ها ---------- */
 function renderGames(s){
+ const dcont=s.draw?`<button id="dcont">▶️ ادامه نقاشی (${s.draw.status==="lobby"?"در حال جمع‌شدن بازیکن":"در جریان"})</button>`:"";
  const cont=s.game?`<button id="gcont">▶️ ادامه بازی (${s.game.status==="lobby"?"در حال جمع‌شدن بازیکن":"در جریان"})</button>`:"";
  $("gl").innerHTML=`<div class="gc"><div class="gimg"></div><div class="gb">
  <h3>🎲🐍 مار و پله</h3>
@@ -982,12 +1061,20 @@ function renderGames(s){
  <button class="alt" id="gprac">🤖 تمرین با ربات (رایگان)</button>
  <div class="msg">برای بازی با شرط: توی گروه بنویس «مار و پله 10» و بقیه رو دعوت کن.</div>
  </div></div>
+ <div class="gc" style="margin-top:14px"><div class="dimg"></div><div class="gb">
+ <h3>🖌 نقاشی و حدس</h3>
+ <p>۲ تا ۴ نفر، شرط‌بندی با الماس. ۴ دور؛ هر دور یکی نقاشی می‌کشه و بقیه حدس می‌زنن!</p>
+ <ul class="rl"><li>هر دور ۳۰ ثانیه؛ نقاش یه کلمهٔ مخفی می‌گیره و فقط با نقاشی توضیحش می‌ده</li><li>بقیه بین ۴ گزینه حدس می‌زنن؛ هرچی سریع‌تر، امتیاز بیشتر ⚡</li><li>نقاش به‌ازای هر حدس درست امتیاز می‌گیره</li><li>آخر هر دور ۵ ثانیه نتیجه نشون داده می‌شه؛ آخر بازی برنده و بازنده‌ها مشخص می‌شن</li><li>جایزه = کل شرط‌ها منهای ۵٪ مالیات</li></ul>
+ ${dcont}
+ <div class="msg">برای ساخت میز: توی گروه بنویس «نقاشی 20» (عدد = شرط به الماس) و بقیه رو دعوت کن.</div>
+ </div></div>
  <div class="gc" style="margin-top:14px"><div class="gb">
  <h3>🎨 استیکرهای تلگرام</h3><p>لینک پک استیکر را از تلگرام کپی کن و اینجا وارد کن تا به مجموعه‌ات اضافه شود.</p>
  <input id="sturl" dir="ltr" placeholder="https://t.me/addstickers/PackName" style="width:100%;margin:8px 0">
  <button id="stadd">➕ افزودن پک استیکر</button><div id="stpacks" class="hint">در حال دریافت پک‌ها…</div>
  </div></div>`;
  const c=$("gcont");if(c)c.onclick=()=>openGame(s.game.id,false);
+ const dc=$("dcont");if(dc)dc.onclick=()=>openDraw(s.draw.id);
  $("gprac").onclick=startPractice;
  loadStickerPacks();
 }
@@ -1130,7 +1217,7 @@ function openGame(gid,prac){
  shell();FIRST=true;SIG="";LSEQ=-1;STOPAT=0;
  if(PRAC){PON=true;applyG(PG)}
  else{$("gtop").innerHTML='<div class="msg">در حال بارگذاری…</div>';poll();PT=setInterval(poll,1300)}}
-function stopGame(){clearInterval(PT);PT=null;PON=false;GS=null}
+function stopGame(){clearInterval(PT);PT=null;PON=false;GS=null;if(typeof drStop==="function")drStop()}
 function reloadDash(){api("/api/me").then(s=>renderAll(s)).catch(()=>{})}
 async function poll(){try{const r=await api("/api/snk/state",{gid:GID});
  if(!r.game){$("gtop").innerHTML=`<div class="msg">${GE[r.error]||"بازی فعالی نداری."}</div>`;clearInterval(PT);PT=null;return}
@@ -1221,14 +1308,207 @@ function pRoll(){
  RB=false;applyG(g);
  if(g.status==="playing"&&g.turn===2)setTimeout(()=>{if(PON&&PG===g){RB=true;pRoll()}},(g.last&&g.last.ev?4600:3000))}
 
+/* ================= بازی نقاشی ================= */
+const DCOL=["#111111","#ff1744","#ff6d00","#ffd600","#76ff03","#00c853","#00e5ff","#2979ff","#651fff","#d500f9","#ff4081","#8d5524","#9e9e9e","#fffef9"],DW=[6,14,34],DPAPER="#fffef9";
+const DE={not_player:"تو توی این بازی نیستی.",no_game:"این بازی فعال نیست.",not_draw:"الان زمان حدس زدن نیست.",drawer:"نقاش نمی‌تونه حدس بزنه 😅",already:"قبلاً جواب دادی.",bad_option:"گزینه نامعتبره.",not_drawer:"الان نوبت نقاشی تو نیست.",wait_drawing:"صبر کن نقاش شروع کنه ✏️",stale:"دور عوض شد.",rate:"کمی صبر کن."};
+let DR=null;
+function drNew(gid){return{gid:gid,rnd:null,n:0,fresh:true,GS:null,sig:"",dsig:"",osig:"",LEFT:0,LAT:0,col:0,wid:1,q:[],cur:null,drawing:false,inflight:false,polling:false,pt:null,ft:null,busyG:false,lastSec:-1,myk:"",prevRnd:-1,done:false,stopAt:0,confetti:false,tmv:"",sc:{},cx:null}}
+function drStop(){const D=DR;if(!D)return;clearInterval(D.pt);clearInterval(D.ft);DR=null;try{tg&&tg.enableVerticalSwipes&&tg.enableVerticalSwipes()}catch(e){}}
+function openDraw(gid){
+ stopGame();
+ for(const k in PANES)$(PANES[k]).style.display="none";
+ $("g").style.display="block";$("ttl").style.display="none";document.body.classList.add("ing");
+ try{tg&&tg.disableVerticalSwipes&&tg.disableVerticalSwipes()}catch(e){}
+ DR=drNew(gid);drShell();
+ drPoll();DR.pt=setInterval(drPoll,800);DR.ft=setInterval(drFlush,300)}
+function drShell(){
+ $("g").innerHTML=`<div class="gbar"><button class="alt sm" id="dback">‹ بازگشت</button><button class="alt sm" id="dsnd">${SFX.on?"🔊 صدا":"🔇 بی‌صدا"}</button></div>
+ <div id="dtop"><div class="msg">در حال بارگذاری…</div></div>
+ <div class="dcw" id="dcw"><canvas id="dcv" width="1000" height="1000"></canvas><div class="dov" id="dov"></div></div>
+ <div id="ddock"></div>`;
+ $("dback").onclick=()=>{drStop();showTab(VIEW==="dash"?"games":VIEW);reloadDash()};
+ $("dsnd").onclick=()=>{SFX.set(!SFX.on);$("dsnd").textContent=SFX.on?"🔊 صدا":"🔇 بی‌صدا";if(SFX.on)SFX.tick()};
+ const cv=$("dcv");DR.cx=cv.getContext("2d");drClear();
+ cv.addEventListener("pointerdown",drDown);cv.addEventListener("pointermove",drMove);
+ cv.addEventListener("pointerup",drUp);cv.addEventListener("pointercancel",drUp);
+ $("ddock").onclick=e=>{
+  const D=DR;if(!D)return;
+  const c=e.target.closest("[data-c]");if(c){D.col=+c.dataset.c;drSel();haptic("light");return}
+  const w=e.target.closest("[data-w]");if(w){D.wid=+w.dataset.w;if(D.col===13)D.col=0;drSel();haptic("light");return}
+  if(e.target.closest("[data-e]")){D.col=13;drSel();haptic("light");return}
+  if(e.target.closest("[data-clr]")){drCut();D.q.push({clr:1});drClear();haptic("warning");return}
+  const o=e.target.closest("[data-o]");if(o&&!o.disabled)drGuess(+o.dataset.o)}}
+function drClear(){const D=DR;if(!D||!D.cx)return;D.cx.fillStyle=DPAPER;D.cx.fillRect(0,0,1000,1000)}
+function drawOp(o){
+ const D=DR;if(!D||!D.cx)return;const cx=D.cx;
+ if(o.clr){drClear();return}
+ const p=o.p,c=DCOL[o.c]||"#111",w=DW[o.w]||14;
+ cx.strokeStyle=c;cx.fillStyle=c;cx.lineWidth=w;cx.lineCap="round";cx.lineJoin="round";
+ if(p.length<4){cx.beginPath();cx.arc(p[0],p[1],w/2,0,6.2832);cx.fill();return}
+ cx.beginPath();cx.moveTo(p[0],p[1]);for(let i=2;i<p.length;i+=2)cx.lineTo(p[i],p[i+1]);cx.stroke()}
+function drSel(){
+ document.querySelectorAll("#dsw a").forEach(a=>a.classList.toggle("on",+a.dataset.c===DR.col));
+ document.querySelectorAll("#dsz [data-w]").forEach(a=>a.classList.toggle("on",+a.dataset.w===DR.wid&&DR.col!==13));
+ const e=document.querySelector("#dsz [data-e]");if(e)e.classList.toggle("on",DR.col===13)}
+/* ---- کشیدن (فقط نقاش) ---- */
+function drCanDraw(){const D=DR;if(!D||!D.GS)return false;const g=D.GS;
+ return g.status==="playing"&&g.phase==="draw"&&g.drawer===g.me&&(D.LEFT-(Date.now()-D.LAT)/1000)>0}
+function drPtr(e){const r=$("dcv").getBoundingClientRect();
+ return[Math.max(0,Math.min(1000,Math.round((e.clientX-r.left)/r.width*1000))),Math.max(0,Math.min(1000,Math.round((e.clientY-r.top)/r.height*1000)))]}
+function drDown(e){
+ const D=DR;if(!D||!drCanDraw())return;e.preventDefault();
+ try{$("dcv").setPointerCapture(e.pointerId)}catch(x){}
+ const q=drPtr(e);D.drawing=true;D.cur={c:D.col,w:D.wid,p:[q[0],q[1]],sent:0};
+ drawOp({c:D.col,w:D.wid,p:[q[0],q[1]]})}
+function drMove(e){
+ const D=DR;if(!D||!D.drawing||!D.cur)return;e.preventDefault();
+ if(!drCanDraw()){drUp(e);return}
+ const cur=D.cur,cx=D.cx,evs=(e.getCoalescedEvents&&e.getCoalescedEvents().length)?e.getCoalescedEvents():[e];
+ cx.strokeStyle=DCOL[cur.c];cx.lineWidth=DW[cur.w];cx.lineCap="round";cx.lineJoin="round";
+ for(const ev of evs){
+  const q=drPtr(ev),n=cur.p.length,lx=cur.p[n-2],ly=cur.p[n-1];
+  if(Math.hypot(q[0]-lx,q[1]-ly)<2.5)continue;
+  cx.beginPath();cx.moveTo(lx,ly);cx.lineTo(q[0],q[1]);cx.stroke();
+  cur.p.push(q[0],q[1]);
+  if(cur.p.length-cur.sent>=160)drCut()}}
+function drUp(){const D=DR;if(!D)return;D.drawing=false;if(D.cur){drCut();D.cur=null;drFlush()}}
+function drCut(){
+ const D=DR,c=D&&D.cur;if(!c||c.p.length<=c.sent)return;
+ const from=c.sent>0?Math.max(0,c.sent-2):0;
+ D.q.push({c:c.c,w:c.w,p:c.p.slice(from)});c.sent=c.p.length}
+async function drFlush(){
+ const D=DR;if(!D||D.inflight||!D.GS)return;
+ const g=D.GS;
+ if(g.drawer!==g.me||g.phase!=="draw"||g.status!=="playing"){D.q.length=0;D.cur=null;return}
+ drCut();if(!D.q.length)return;
+ const batch=D.q.splice(0,30);D.inflight=true;
+ try{const r=await api("/api/drw/ops",{gid:D.gid,ops:batch,rnd:D.rnd,since:D.n});
+  if(DR===D&&r.game)drApply(r.game)}
+ catch(e){if(DR===D)D.q.unshift(...batch)}
+ finally{D.inflight=false}}
+/* ---- حدس زدن ---- */
+async function drGuess(i){
+ const D=DR;if(!D||D.busyG)return;D.busyG=true;SFX.unlock();SFX.tick();
+ try{const r=await api("/api/drw/guess",{gid:D.gid,opt:i,rnd:D.rnd,since:D.n});
+  if(DR!==D)return;
+  if(r.game)drApply(r.game);if(r.error)toast(DE[r.error]||"خطا")}
+ catch(e){toast(e.message)}finally{D.busyG=false}}
+/* ---- همگام‌سازی با سرور ---- */
+async function drPoll(){
+ const D=DR;if(!D||D.polling)return;D.polling=true;
+ try{const r=await api("/api/drw/state",{gid:D.gid,rnd:D.rnd,since:D.n});
+  if(DR!==D)return;
+  if(!r.game){$("dtop").innerHTML=`<div class="msg">${DE[r.error]||"بازی فعالی نداری."}</div>`;clearInterval(D.pt);clearInterval(D.ft);return}
+  drApply(r.game)}
+ catch(e){}finally{D.polling=false}}
+function drApply(g){
+ const D=DR;if(!D)return;
+ D.GS=g;D.LEFT=g.left;D.LAT=Date.now();
+ const isD=g.drawer===g.me;
+ /* بوم */
+ if(g.rnd!==D.rnd||g.reset){drClear();D.n=0;D.rnd=g.rnd;D.fresh=true;D.q=[];D.cur=null;D.drawing=false}
+ if(!isD||D.fresh){if(g.from<=D.n){for(let i=D.n-g.from;i<g.ops.length;i++)drawOp(g.ops[i]);D.n=g.from+g.ops.length}}
+ else D.n=g.total;
+ if(D.n>=g.total)D.fresh=false;
+ else if(!isD)setTimeout(drPoll,60);
+ /* صدا و حس‌های دور جدید / جواب من / پایان */
+ if(g.status==="playing"&&D.prevRnd!==g.rnd){
+  if(D.prevRnd!==-1){SFX.six();haptic("light")}
+  if(isD)toast("✏️ نوبت نقاشی توئه! کلمه: «"+g.word+"»",3000);
+  D.prevRnd=g.rnd}
+ const k=g.my?(g.my.ok?"ok":"no"):"";
+ if(k!==D.myk){if(k==="ok"){SFX.ladder();haptic("success")}else if(k==="no"){SFX.lose();haptic("error")}D.myk=k}
+ if(g.status==="done"&&!D.done){D.done=true;const iw=(g.winners||[]).includes(g.me);if(!g.all_zero){SFX[iw?"win":"lose"]();haptic(iw?"success":"warning")}}
+ /* بالا (امتیازها) */
+ const sig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.players.map(p=>[p.score,p.ans])]);
+ if(sig!==D.sig){D.sig=sig;drRenderTop(g)}
+ const dsig=JSON.stringify([g.status,g.phase,g.rnd,g.drawer,g.my&&g.my.opt,g.my&&g.my.ok,g.total>0,g.word]);
+ if(dsig!==D.dsig){D.dsig=dsig;drRenderDock(g)}
+ const osig=JSON.stringify([g.status,g.phase,g.rnd,g.last_round&&g.last_round.rnd]);
+ if(osig!==D.osig){D.osig=osig;drOverlay(g)}
+ if(["done","cancelled","refunded"].includes(g.status)){
+  if(!D.stopAt)D.stopAt=Date.now()+6000;else if(Date.now()>D.stopAt){clearInterval(D.pt);clearInterval(D.ft)}}}
+/* ---- رندر ---- */
+function drRenderTop(g){
+ const me=g.me,ring='<div class="dring" id="dring"><b id="dtn"></b></div>';
+ const dn=(g.players.find(p=>p.id===g.drawer)||{}).name||"—";
+ const isD=g.drawer===me;
+ const pls=g.players.map(p=>{const prev=DR.sc[p.id];DR.sc[p.id]=p.score;const up=prev!==undefined&&p.score>prev;
+  return `<div class="dpl ${p.id===g.drawer&&g.status==="playing"?"dr":""} ${p.id===me?"me":""} ${up?"up":""}"><u style="background:${COLORS[p.idx%4]}">${esc((p.name||"?").trim().charAt(0)||"?")}</u><span>${esc(p.name)}${p.id===g.drawer&&g.status==="playing"?" ✏️":""}${p.ans?" ✅":""}</span><b>${fa(p.score)}</b></div>`}).join("");
+ let head;
+ if(g.status==="lobby")head=`<div class="dhd"><div class="dtt"><b>🎨 نقاشی و حدس</b><small>منتظر شروع بازی…</small></div>${ring}</div>`;
+ else if(g.status==="playing")head=`<div class="dhd"><div class="dch">دور ${fa(g.rnd)} از ${fa(g.rounds)}</div><div class="dtt"><b>${g.phase==="result"?"📊 نتیجهٔ دور":isD?"✏️ نوبت نقاشی توئه!":esc(dn)+" داره نقاشی می‌کشه"}</b><small>${g.phase==="result"?"آماده شو برای دور بعد":isD?"کلمه رو فقط تو می‌بینی؛ ۳۰ ثانیه وقت داری":"بین گزینه‌ها حدس بزن چی می‌کشه!"}</small></div>${ring}</div>`;
+ else head=`<div class="dhd"><div class="dtt"><b>${g.status==="done"?"🏁 بازی تموم شد":"❌ بازی لغو شد"}</b><small>${g.status==="done"?"نتیجهٔ نهایی پایین‌تره":"شرط‌ها برگشت"}</small></div></div>`;
+ $("dtop").innerHTML=head+`<div class="dpls">${pls}</div>`;DR.tmv=""}
+function drRenderDock(g){
+ const dk=$("ddock");if(!dk)return;
+ if(g.status!=="playing"){dk.innerHTML=g.status==="done"||g.status==="cancelled"||g.status==="refunded"?`<button id="dback2" style="margin-top:12px">‹ بازگشت به بازی‌ها</button>`:"";
+  const b=$("dback2");if(b)b.onclick=()=>$("dback").click();return}
+ if(g.drawer===g.me){
+  if(g.phase!=="draw"){dk.innerHTML=`<div class="dnote">نقاشی تموم شد 👏</div>`;return}
+  dk.innerHTML=`<div class="dword"><small>کلمهٔ تو</small><b>${esc(g.word||"")}</b><small>بدون نوشتن؛ فقط با نقاشی!</small></div>
+  <div class="dtools"><div class="dsw" id="dsw">${DCOL.slice(0,13).map((c,i)=>`<a data-c="${i}" style="background:${c};color:${c}"></a>`).join("")}</div>
+  <div class="dsz" id="dsz"><a data-w="0"><i style="width:6px;height:6px"></i></a><a data-w="1"><i style="width:12px;height:12px"></i></a><a data-w="2"><i style="width:20px;height:20px"></i></a><a data-e="1">🧽</a><a data-clr="1">🗑</a></div></div>`;
+  drSel();return}
+ const my=g.my;
+ const opts=(g.options||[]).map((w,i)=>{let cls="";
+  if(my&&my.opt===i)cls=my.ok?"ok":"no";
+  if(g.phase==="result"&&w===g.word)cls="ok";
+  return `<button class="dop ${cls}" data-o="${i}" ${(my||g.phase!=="draw"||!g.total)?"disabled":""}>${esc(w)}</button>`}).join("");
+ let note;
+ if(g.phase==="result")note="دور تموم شد؛ نتیجه بالاست 👆";
+ else if(my)note=my.ok?`✅ درست بود! <b>+${fa(my.pts)}</b> امتیاز — منتظر بقیه…`:"❌ غلط بود؛ منتظر پایان دور…";
+ else note=g.total?"کدوم گزینه درسته؟ هرچی زودتر، امتیاز بیشتر ⚡":"⏳ منتظر شروع نقاشی…";
+ dk.innerHTML=`<div class="dopts">${opts}</div><div class="dnote">${note}</div>`}
+function drResultHTML(g){
+ const L=g.last_round,me=g.me,last=g.rnd>=g.rounds;
+ const rows=L.items.map(it=>`<div class="drow ${it.st==="ok"?"w":it.st==="wrong"?"l":""}"><span class="rk">${it.st==="ok"?"✅":it.st==="wrong"?"❌":"⏳"}</span><span class="nm2">${esc(it.name)}${it.id===me?" (تو)":""}</span><span class="st">${it.st==="ok"?"درست":it.st==="wrong"?"غلط":"جواب نداد"}</span><b>${it.pts?"+"+fa(it.pts):fa(0)}</b></div>`).join("");
+ return `<div class="dcard"><small>🎨 نتیجهٔ دور ${fa(L.rnd)} از ${fa(g.rounds)}</small><div class="dwd">${esc(L.word)}</div>
+ <div class="drow dr"><span class="rk">✏️</span><span class="nm2">${esc(L.drawer_name)}${L.drawer===me?" (تو)":""} · نقاش</span><span class="st">${L.empty?"نکشید 😅":"نقاشی"}</span><b>${L.drawer_pts?"+"+fa(L.drawer_pts):fa(0)}</b></div>${rows}
+ <div class="dnext">${last?"نتیجهٔ نهایی":"دور بعدی"} تا <b id="dres">${fa(g.result_sec)}</b> ثانیه…</div></div>`}
+function drFinalHTML(g){
+ const me=g.me,w=g.winners||[],net=g.net||{};
+ const rk=g.players.slice().sort((a,b)=>b.score-a.score),iw=w.includes(me),medal=["🥇","🥈","🥉","4️⃣"];
+ let head;
+ if(g.all_zero)head=`<div class="dbig">🤝</div><b>مساوی!</b><small>هیچ‌کس امتیازی نگرفت؛ شرط‌ها برگشت</small>`;
+ else{const n=Number(net[me]||0);head=`<div class="dbig">${iw?"🏆":"😵"}</div><b>${iw?"تو برنده شدی! 🎉":"باختی؛ دفعهٔ بعد جبران کن!"}</b><small>${iw?"+ "+fa(String(Math.max(0,n)))+" الماس خالص":"− "+fa(String(g.bet))+" الماس"}</small>`}
+ const rows=rk.map((p,i)=>{const win=!g.all_zero&&w.includes(p.id);
+  return `<div class="drow ${g.all_zero?"":win?"w":"l"}"><span class="rk">${medal[i]}</span><span class="nm2">${esc(p.name)}${p.id===me?" (تو)":""}</span><span class="st">${g.all_zero?"مساوی":win?"برنده 🏆":"بازنده"}</span><b>${fa(p.score)}</b></div>`}).join("");
+ const prize=g.all_zero?"":`<div class="dnext">🎁 جایزه: <b>${fa(String(Number(g.payout)))}</b> الماس (۵٪ مالیات کسر شد)</div>`;
+ return `<div class="dcard">${head}<div style="margin-top:8px">${rows}</div>${prize}</div>`}
+function drOverlay(g){
+ const ov=$("dov");if(!ov)return;DR.tmv="";
+ if(g.status==="playing"&&g.phase==="result"&&g.last_round){ov.innerHTML=drResultHTML(g);ov.className="dov on";return}
+ if(g.status==="done"){ov.innerHTML=drFinalHTML(g);ov.className="dov on";
+  if(!DR.confetti&&!g.all_zero&&(g.winners||[]).includes(g.me)){DR.confetti=true;
+   const cl=["#ff1744","#ffd600","#00e5ff","#76ff03","#d500f9","#ff6d00"];
+   for(let i=0;i<46;i++){const c=document.createElement("i");c.className="cf";c.style.left=(Math.random()*100)+"%";c.style.background=cl[i%6];c.style.animationDelay=(Math.random()*1.2)+"s";ov.appendChild(c)}}
+  return}
+ if(g.status==="cancelled"||g.status==="refunded"){ov.innerHTML=`<div class="dcard"><div class="dbig">❌</div><b>بازی لغو شد</b><small>شرط‌ها برگشت</small></div>`;ov.className="dov on";return}
+ if(g.status==="lobby"){ov.innerHTML=`<div class="dcard"><div class="dbig">🎨</div><b>منتظر بازیکن‌ها…</b><small>با «شروع بازی» توی گروه یا خودکار شروع می‌شه</small><div class="dnext">مهلت: <b id="dres">${fa(g.left)}</b> ثانیه</div></div>`;ov.className="dov on";return}
+ ov.className="dov";ov.innerHTML=""}
+/* ---- تایمر (محلی، هر ۰٫۲۵ ثانیه) ---- */
+setInterval(()=>{
+ const D=DR;if(!D||!D.GS)return;const g=D.GS;
+ const run=g.status==="playing"||g.status==="lobby";
+ const left=run?Math.max(0,D.LEFT-(Date.now()-D.LAT)/1000):0;
+ const tot=g.status==="lobby"?g.lobby_sec:(g.phase==="result"?g.result_sec:g.draw_sec);
+ const s=Math.ceil(left),ring=$("dring"),tn=$("dtn"),rs=$("dres");
+ if(ring)ring.style.background=`conic-gradient(${(g.phase==="draw"&&left<=8)?"#ff4d6d":"#19d3ff"} ${Math.min(360,(left/Math.max(1,tot))*360)}deg,rgba(255,255,255,.12) 0)`;
+ const v=run?fa(s):"";
+ if(v!==D.tmv){D.tmv=v;if(tn)tn.textContent=v;if(rs)rs.textContent=v}
+ if(g.status==="playing"&&g.phase==="draw"&&s<=5&&s>0&&s!==D.lastSec){D.lastSec=s;SFX.tick()}
+},250);
+
 /* ---------- شروع ---------- */
 (async()=>{
  const qp=new URLSearchParams(location.search);
  const sp=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||"";
  const g0=parseInt(qp.get("g")||(sp.startsWith("snk_")?sp.slice(4):""),10);
+ const d0=parseInt(qp.get("d")||(sp.startsWith("drw_")?sp.slice(4):""),10);
  if(qp.get("tab")&&PANES[qp.get("tab")])VIEW=qp.get("tab");
  try{const s=await api("/api/me");renderAll(s);showTab(VIEW);
-  if(g0)openGame(g0,false);else if(s.game&&sp==="snk")openGame(s.game.id,false)}
+  if(d0)openDraw(d0);else if(g0)openGame(g0,false);else if(s.game&&sp==="snk")openGame(s.game.id,false);else if(s.draw&&sp==="drw")openDraw(s.draw.id)}
  catch(e){$("v").className="";$("v").innerHTML=`<div class="msg">${e.message}<br><br>مینی‌اپ رو از داخل ربات باز کن.</div>`}
 })();
 </script></body></html>
