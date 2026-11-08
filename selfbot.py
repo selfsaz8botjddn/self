@@ -339,7 +339,7 @@ async def start_client(uid):
                 await ev.delete()
                 return
             if d.get("pv_join"):
-                channels = [x.strip().lstrip("@") for x in os.environ.get("SELF_PV_JOIN_CHANNELS", "selfsaz_iran,fox_frenzy").split(",") if x.strip()]
+                channels = [x.strip().lstrip("@") for x in os.environ.get("SELF_PV_JOIN_CHANNELS", "selfsaz_iran,jagh_game").split(",") if x.strip()]
                 missing = []
                 for channel in channels[:5]:
                     try:
