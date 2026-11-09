@@ -1733,7 +1733,7 @@ async def _pvjoin_cmd(uid, ev, arg):
         return
     _pput(uid, d)
     if d["pv_join"]:
-        chs = [x.strip().lstrip("@") for x in os.environ.get("SELF_PV_JOIN_CHANNELS", "selfsaz_iran,fox_frenzy").split(",") if x.strip()]
+        chs = [x.strip().lstrip("@") for x in os.environ.get("SELF_PV_JOIN_CHANNELS", "selfsaz_iran,jagh_game").split(",") if x.strip()]
         await _say(uid, ev, "✅ عضویت اجباری پیوی روشن شد؛ کسی که عضو کانال‌های زیر نباشه نمی‌تونه بهت پیام بده:\n"
                    + "\n".join("@" + x for x in chs[:5]))
     else:

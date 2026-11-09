@@ -12,7 +12,7 @@ from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHa
 from database import Base, get_session
 import selfbot
 
-CHANNELS = [('@selfsaz_iran', 'https://t.me/selfsaz_iran'), ('@fox_frenzy', 'https://t.me/fox_frenzy')]
+CHANNELS = [('@selfsaz_iran', 'https://t.me/selfsaz_iran'), ('@jagh_game', 'https://t.me/jagh_game')]
 SUPPORT = '@escotch'
 CARD = '6219 8618 5116 0068'
 OWNER = 'ظریفی'

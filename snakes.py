@@ -35,6 +35,18 @@ MIN_BET = 5
 MAX_BET = 1_000_000
 MAX_PLAYERS = 4
 LOBBY_SEC = 120
+
+# فقط توی این گروه بازی ساخته می‌شه؛ توی بقیهٔ گروه‌ها ربات به «مار و پله» جواب نمی‌ده.
+GAME_CHAT_USERNAME = "fox_frnzy"
+GAME_CHAT_IDS = {-1001794200687}     # اگه آیدی درست نبود، یوزرنیم بالا هنوز کار می‌کنه
+
+
+def _game_chat_ok(chat):
+    if chat is None:
+        return False
+    if chat.id in GAME_CHAT_IDS:
+        return True
+    return (chat.username or "").lower() == GAME_CHAT_USERNAME
 TURN_SEC = 30
 MAX_SKIPS = 3
 TAX = Decimal("0.05")
@@ -432,6 +444,8 @@ async def cmd_new(update, context):
     u = update.effective_user
     if not m or not u or not m.text or update.effective_chat.type == "private":
         return
+    if not _game_chat_ok(update.effective_chat):
+        return      # گروه مجاز نیست؛ بی‌صدا نادیده گرفته می‌شه
     cm = _cm()
     import miniapp
     mt = _PAT.match(m.text)

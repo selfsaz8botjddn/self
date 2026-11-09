@@ -39,8 +39,20 @@ logger = logging.getLogger(__name__)
 MIN_BET = 5
 MAX_BET = 1_000_000
 MIN_PLAYERS = 2
-MAX_PLAYERS = 4
+MAX_PLAYERS = 2          # نقاشی فقط دو نفره
 ROUNDS = 4
+
+# فقط توی این گروه بازی ساخته می‌شه؛ توی بقیهٔ گروه‌ها ربات به «نقاشی» جواب نمی‌ده.
+GAME_CHAT_USERNAME = "fox_frnzy"
+GAME_CHAT_IDS = {-1001794200687}     # اگه آیدی درست نبود، یوزرنیم بالا هنوز کار می‌کنه
+
+
+def _game_chat_ok(chat):
+    if chat is None:
+        return False
+    if chat.id in GAME_CHAT_IDS:
+        return True
+    return (chat.username or "").lower() == GAME_CHAT_USERNAME
 LOBBY_SEC = 120
 DRAW_SEC = 50
 RESULT_SEC = 5
@@ -484,6 +496,8 @@ async def cmd_new(update, context):
     u = update.effective_user
     if not m or not u or not m.text or update.effective_chat.type == "private":
         return
+    if not _game_chat_ok(update.effective_chat):
+        return      # گروه مجاز نیست؛ بی‌صدا نادیده گرفته می‌شه
     cm = _cm()
     import miniapp
     mt = _PAT.match(m.text)
